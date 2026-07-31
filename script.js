@@ -21,9 +21,10 @@ let reader = null;
 let writer = null;
 let keyData = [];
 let selectedIndex = null;
-let socdPairs = [];          // array of { idx1, idx2 }
+let socdPairs = [];
 let socdPicking = false;
 let socdPickBuffer = [];
+let heartbeatInterval = null;
 
 // ---------- Logging ----------
 function log(msg, isError = false) {
@@ -36,12 +37,12 @@ function log(msg, isError = false) {
   if (empty) empty.remove();
 }
 
-// ---------- Helper: is button in any SOCD pair? ----------
+// ---------- Helper ----------
 function isInSocdPair(index) {
   return socdPairs.some(pair => pair.idx1 === index || pair.idx2 === index);
 }
 
-// ---------- UI updates ----------
+// ---------- UI ----------
 function renderGrid() {
   buttonGrid.innerHTML = '';
   for (let i = 0; i < 6; i++) {
@@ -50,7 +51,6 @@ function renderGrid() {
     if (selectedIndex === i) cls += ' selected';
     if (socdPicking && socdPickBuffer.includes(i)) cls += ' socd-picked';
     else if (socdPicking) cls += ' socd-pick';
-    // Add SOCD‑active class if this button is in a pair
     if (isInSocdPair(i)) cls += ' socd-active';
     
     slot.className = cls;
@@ -90,7 +90,6 @@ function onSlotClick(index) {
     return;
   }
 
-  // Normal selection for key assignment
   if (selectedIndex === index) {
     selectedIndex = null;
   } else {
@@ -120,6 +119,10 @@ function updateUI(connected) {
   socdClearBtn.disabled = !connected || socdPairs.length === 0;
   statusDot.className = 'status-dot' + (connected ? ' connected' : '');
   statusText.textContent = connected ? 'Connected' : 'Disconnected';
+  if (!connected && heartbeatInterval) {
+    clearInterval(heartbeatInterval);
+    heartbeatInterval = null;
+  }
 }
 
 function updateKeyboardState() {
@@ -144,7 +147,6 @@ function updateSocdHint() {
       socdHint.textContent = 'Pair ready – sending…';
     }
   } else {
-    // Check if we already have 2 pairs
     if (socdPairs.length >= 2) {
       socdHint.textContent = '⚠️ Maximum 2 SOCD profiles reached.';
     } else {
@@ -173,38 +175,66 @@ function renderSocdList() {
     });
     socdList.appendChild(el);
   });
-  // Update hint after list change
   updateSocdHint();
 }
 
-// ---------- Serial communication ----------
+// ---------- Serial ----------
 async function sendCommand(cmd) {
   if (!writer) throw new Error('No writer');
-  await writer.write(new TextEncoder().encode(cmd + '\n'));
-  log(`TX: ${cmd}`);
+  try {
+    await writer.write(new TextEncoder().encode(cmd + '\n'));
+    log(`TX: ${cmd}`);
+  } catch (e) {
+    log(`Write error: ${e.message}`, true);
+    await disconnect();
+    throw e;
+  }
 }
 
 async function readUntil(predicate, timeoutMs = 3000) {
   if (!reader) throw new Error('No reader');
   let buffer = '';
   const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    const chunk = new TextDecoder().decode(value);
-    buffer += chunk;
-    const lines = buffer.split('\n');
-    buffer = lines.pop() || '';
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (trimmed) log(`RX: ${trimmed}`);
-      if (predicate(trimmed)) return trimmed;
+  try {
+    while (Date.now() - start < timeoutMs) {
+      const { value, done } = await reader.read();
+      if (done) {
+        // Port closed – return null, let caller decide
+        return null;
+      }
+      const chunk = new TextDecoder().decode(value);
+      buffer += chunk;
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed) log(`RX: ${trimmed}`);
+        if (predicate(trimmed)) return trimmed;
+      }
     }
+    return null;
+  } catch (e) {
+    log(`Read error: ${e.message}`, true);
+    return null; // don't disconnect here, let caller handle
   }
-  return null;
 }
 
-// ---------- Fetch all keys ----------
+// ---------- Heartbeat ----------
+async function checkConnection() {
+  if (!writer) return false;
+  try {
+    await sendCommand('PING');
+    const resp = await readUntil(line => line === 'PONG', 1000);
+    if (resp === 'PONG') return true;
+    await disconnect();
+    return false;
+  } catch (e) {
+    await disconnect();
+    return false;
+  }
+}
+
+// ---------- Fetch Keys ----------
 async function fetchAllKeys() {
   if (!writer) return;
   await sendCommand('GETALL');
@@ -214,7 +244,7 @@ async function fetchAllKeys() {
   const start = Date.now();
   while (!done && (Date.now() - start < 3000)) {
     const { value, done: doneRead } = await reader.read();
-    if (doneRead) break;
+    if (doneRead) return;
     const chunk = new TextDecoder().decode(value);
     buffer += chunk;
     const lines = buffer.split('\n');
@@ -238,7 +268,7 @@ async function fetchAllKeys() {
   log(`Fetched ${keyData.length} key mappings`);
 }
 
-// ---------- Fetch SOCD status ----------
+// ---------- Fetch SOCD ----------
 async function fetchSocd() {
   if (!writer) return;
   await sendCommand('GETSOCD');
@@ -256,7 +286,7 @@ async function fetchSocd() {
       }
     }
     renderSocdList();
-    renderGrid(); // update badges
+    renderGrid();
     updateUI(true);
     updateSocdHint();
   } else {
@@ -264,10 +294,9 @@ async function fetchSocd() {
   }
 }
 
-// ---------- SOCD actions ----------
+// ---------- SOCD Actions ----------
 async function addSocdPair(idx1, idx2) {
   if (!writer) return;
-  // Check max before sending
   if (socdPairs.length >= 2) {
     const msg = 'Maximum 2 SOCD profiles reached.';
     log(msg, true);
@@ -275,40 +304,52 @@ async function addSocdPair(idx1, idx2) {
     return;
   }
   await sendCommand(`SOCD ADD ${idx1+1} ${idx2+1}`);
-  const resp = await readUntil(line => line === 'OK SOCD ADD' || line.startsWith('ERROR'), 1500);
-  if (resp && resp === 'OK SOCD ADD') {
+  // Read until we see a line that starts with "OK" or "ERROR"
+  const resp = await readUntil(line => line.startsWith('OK') || line.startsWith('ERROR'), 2000);
+  if (resp && resp.startsWith('OK')) {
     log(`Added SOCD pair: Button ${idx1+1} ↔ ${idx2+1}`);
     await fetchSocd();
-  } else {
+  } else if (resp && resp.startsWith('ERROR')) {
     log(`Failed to add SOCD pair: ${resp}`, true);
+  } else {
+    // No response or malformed – but the firmware might have saved it anyway.
+    // Re-fetch SOCD status to be sure.
+    log('No clear response – refreshing SOCD status', false);
+    await fetchSocd();
   }
 }
 
 async function removeSocdPair(index) {
   if (!writer) return;
   await sendCommand(`SOCD REMOVE ${index+1}`);
-  const resp = await readUntil(line => line === 'OK SOCD REMOVE' || line.startsWith('ERROR'), 1500);
-  if (resp && resp === 'OK SOCD REMOVE') {
+  const resp = await readUntil(line => line.startsWith('OK') || line.startsWith('ERROR'), 2000);
+  if (resp && resp.startsWith('OK')) {
     log(`Removed SOCD pair ${index+1}`);
     await fetchSocd();
-  } else {
+  } else if (resp && resp.startsWith('ERROR')) {
     log(`Failed to remove SOCD pair: ${resp}`, true);
+  } else {
+    log('No clear response – refreshing SOCD status', false);
+    await fetchSocd();
   }
 }
 
 async function clearAllSocd() {
   if (!writer) return;
   await sendCommand('SOCD CLEAR');
-  const resp = await readUntil(line => line === 'OK SOCD CLEAR' || line.startsWith('ERROR'), 1500);
-  if (resp && resp === 'OK SOCD CLEAR') {
+  const resp = await readUntil(line => line.startsWith('OK') || line.startsWith('ERROR'), 2000);
+  if (resp && resp.startsWith('OK')) {
     log('Cleared all SOCD pairs');
     await fetchSocd();
-  } else {
+  } else if (resp && resp.startsWith('ERROR')) {
     log(`Failed to clear SOCD: ${resp}`, true);
+  } else {
+    log('No clear response – refreshing SOCD status', false);
+    await fetchSocd();
   }
 }
 
-// ---------- Assign a key ----------
+// ---------- Key Assignment ----------
 async function assignKey(index, keyName) {
   if (index < 0 || index > 5) return false;
   if (!writer) return false;
@@ -361,6 +402,20 @@ async function connect() {
     updateKeyboardState();
     updateUI(true);
     updateSocdHint();
+
+    if (heartbeatInterval) clearInterval(heartbeatInterval);
+    heartbeatInterval = setInterval(async () => {
+      if (!writer) {
+        clearInterval(heartbeatInterval);
+        heartbeatInterval = null;
+        return;
+      }
+      const ok = await checkConnection();
+      if (!ok) {
+        clearInterval(heartbeatInterval);
+        heartbeatInterval = null;
+      }
+    }, 3000);
   } catch (e) {
     log(`Connection error: ${e.message}`, true);
     await disconnect();
@@ -368,10 +423,23 @@ async function connect() {
 }
 
 async function disconnect() {
+  if (heartbeatInterval) {
+    clearInterval(heartbeatInterval);
+    heartbeatInterval = null;
+  }
   try {
-    if (reader) { await reader.cancel(); reader = null; }
-    if (writer) { await writer.close(); writer = null; }
-    if (port) { await port.close(); port = null; }
+    if (reader) {
+      await reader.cancel();
+      reader = null;
+    }
+    if (writer) {
+      await writer.close();
+      writer = null;
+    }
+    if (port) {
+      await port.close();
+      port = null;
+    }
   } catch (e) { /* ignore */ }
   keyData = [];
   selectedIndex = null;
@@ -386,10 +454,9 @@ async function disconnect() {
   log('Disconnected');
 }
 
-// ---------- Build the FULL keyboard (all symbols) ----------
+// ---------- Build Keyboard ----------
 function buildKeyboard() {
   const rows = [
-    // Row 0: Escape + F1–F12
     [
       { label: 'Esc', value: 'ESC' },
       { label: 'F1', value: 'F1' }, { label: 'F2', value: 'F2' }, { label: 'F3', value: 'F3' },
@@ -397,7 +464,6 @@ function buildKeyboard() {
       { label: 'F7', value: 'F7' }, { label: 'F8', value: 'F8' }, { label: 'F9', value: 'F9' },
       { label: 'F10', value: 'F10' }, { label: 'F11', value: 'F11' }, { label: 'F12', value: 'F12' },
     ],
-    // Row 1: All symbols
     [
       { label: '`', value: '`' }, { label: '~', value: '~' },
       { label: '!', value: '!' }, { label: '@', value: '@' }, { label: '#', value: '#' },
@@ -408,7 +474,6 @@ function buildKeyboard() {
       { label: ':', value: ':' }, { label: '"', value: '"' }, { label: '<', value: '<' },
       { label: '>', value: '>' }, { label: '?', value: '?' },
     ],
-    // Row 2: Numbers
     [
       { label: '`', value: '`' }, { label: '1', value: '1' }, { label: '2', value: '2' },
       { label: '3', value: '3' }, { label: '4', value: '4' }, { label: '5', value: '5' },
@@ -416,7 +481,6 @@ function buildKeyboard() {
       { label: '9', value: '9' }, { label: '0', value: '0' }, { label: '-', value: '-' },
       { label: '=', value: '=' }, { label: '⌫', value: 'BACK', className: 'wide' },
     ],
-    // Row 3: QWERTY
     [
       { label: 'Tab', value: 'TAB', className: 'wide' },
       { label: 'Q', value: 'q' }, { label: 'W', value: 'w' }, { label: 'E', value: 'e' },
@@ -425,7 +489,6 @@ function buildKeyboard() {
       { label: 'P', value: 'p' }, { label: '[', value: '[' }, { label: ']', value: ']' },
       { label: '\\', value: '\\' },
     ],
-    // Row 4: ASDF
     [
       { label: 'Caps', value: 'CAPS', className: 'wider' },
       { label: 'A', value: 'a' }, { label: 'S', value: 's' }, { label: 'D', value: 'd' },
@@ -433,7 +496,6 @@ function buildKeyboard() {
       { label: 'J', value: 'j' }, { label: 'K', value: 'k' }, { label: 'L', value: 'l' },
       { label: ';', value: ';' }, { label: "'", value: "'" }, { label: 'Enter', value: 'ENTER', className: 'wide' },
     ],
-    // Row 5: ZXCV
     [
       { label: 'Shift', value: 'LSHIFT', className: 'wider' },
       { label: 'Z', value: 'z' }, { label: 'X', value: 'x' }, { label: 'C', value: 'c' },
@@ -441,7 +503,6 @@ function buildKeyboard() {
       { label: 'M', value: 'm' }, { label: ',', value: ',' }, { label: '.', value: '.' },
       { label: '/', value: '/' }, { label: 'Shift', value: 'RSHIFT', className: 'wider' },
     ],
-    // Row 6: Modifiers + Space + Navigation
     [
       { label: 'Ctrl', value: 'LCTRL', className: 'wide' },
       { label: 'Win', value: 'LGUI', className: 'wide' },
@@ -455,7 +516,6 @@ function buildKeyboard() {
       { label: '→', value: 'RIGHT', className: 'wide' },
       { label: '↑', value: 'UP', className: 'wide' },
     ],
-    // Row 7: Editing
     [
       { label: 'Ins', value: 'INS' }, { label: 'Home', value: 'HOME' },
       { label: 'PgUp', value: 'PGUP' }, { label: 'Del', value: 'DEL' },
@@ -481,7 +541,7 @@ function buildKeyboard() {
   }
 }
 
-// ---------- Handle key clicks ----------
+// ---------- Key Click ----------
 async function onKeyClick(value) {
   if (selectedIndex === null) {
     log('Please select a button first (click one of the 6 squares)');
@@ -494,7 +554,7 @@ async function onKeyClick(value) {
   await assignKey(selectedIndex, value);
 }
 
-// ---------- Custom key ----------
+// ---------- Custom Key ----------
 async function setCustomKey() {
   if (selectedIndex === null) {
     log('Select a button first');
@@ -509,7 +569,7 @@ async function setCustomKey() {
   customKeyInput.value = '';
 }
 
-// ---------- SOCD button handlers ----------
+// ---------- SOCD Toggle ----------
 function toggleSocdPicking() {
   if (!writer) {
     log('Not connected to Arduino');
@@ -522,7 +582,6 @@ function toggleSocdPicking() {
     return;
   }
   if (socdPicking) {
-    // Cancel
     socdPicking = false;
     socdPickBuffer = [];
     socdAddBtn.textContent = '➕ Add SOCD Pair';
@@ -538,7 +597,7 @@ function toggleSocdPicking() {
   log('SOCD pairing mode: click two buttons to create a new pair.');
 }
 
-// ---------- Event bindings ----------
+// ---------- Events ----------
 connectBtn.addEventListener('click', connect);
 disconnectBtn.addEventListener('click', disconnect);
 refreshBtn.addEventListener('click', async () => {
