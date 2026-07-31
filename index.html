@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>dwnPad Key Changer</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+
+<body>
+  <div class="container">
+    <header>
+      <h1>dwnPad</h1>
+      <div class="status-bar">
+        <button id="connectBtn" class="btn connect">Connect</button>
+        <button id="disconnectBtn" class="btn disconnect" disabled>Disconnect</button>
+        <span id="statusText" class="status-text">Disconnected</span>
+        <span class="status-dot" id="statusDot"></span>
+      </div>
+    </header>
+
+    <!-- 2×3 Button Grid -->
+    <div class="button-grid" id="buttonGrid"></div>
+
+    <!-- SOCD Controls -->
+    <div class="socd-row">
+      <button id="socdAddBtn" class="btn secondary">➕ Add SOCD Pair</button>
+      <button id="socdClearBtn" class="btn danger">✖ Clear All</button>
+      <div id="socdList" class="socd-list"></div>
+      <span id="socdHint" class="socd-hint"></span>
+    </div>
+
+    <!-- Keyboard wrapper -->
+    <div class="keyboard-wrapper">
+      <p class="keyboard-hint" id="keyboardHint">Click a button above to select it, then click a key to assign.</p>
+      <div class="keyboard" id="keyboard"></div>
+    </div>
+
+    <!-- Custom key entry & actions -->
+    <div class="action-row">
+      <input type="text" id="customKeyInput" placeholder="e.g. F13, LCTRL, ~" maxlength="15" />
+      <button id="setCustomKeyBtn" class="btn secondary">Set Custom Key</button>
+      <button id="refreshBtn" class="btn secondary">Refresh</button>
+      <button id="resetBtn" class="btn danger">Reset to Defaults</button>
+    </div>
+
+    <div class="log" id="log"><span class="log-empty">Waiting for actions…</span></div>
+  </div>
+  <script src="script.js"></script>
+</body>
+
+</html>
