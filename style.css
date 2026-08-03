@@ -411,3 +411,9 @@ h1 {
   border-color: #93c5fd;
   background: #eff6ff;
 }
+/* Disabled mode section */
+.mode-section.disabled {
+  opacity: 0.5;
+  pointer-events: none;
+  transition: opacity 0.2s;
+}

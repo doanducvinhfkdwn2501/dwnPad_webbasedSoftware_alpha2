@@ -34,7 +34,7 @@ let socdPicking = false;
 let socdPickBuffer = [];
 let heartbeatInterval = null;
 let busy = false;
-let dualTarget = 'press'; // 'press' or 'release' – which slot is selected for assignment
+let dualTarget = 'press'; // 'press' or 'release'
 
 // ---------- Logging ----------
 function log(msg, isError = false) {
@@ -97,10 +97,16 @@ function updateDisplays() {
     dualPressDisplay.textContent = pressKeys[selectedIndex] || '—';
     dualReleaseDisplay.textContent = releaseKeys[selectedIndex] || '—';
   }
-  // Update active slot highlight
   document.querySelectorAll('.dual-slot').forEach(el => {
     el.classList.toggle('active-slot', el.dataset.slot === dualTarget);
   });
+}
+
+function updateModeSectionState() {
+  const modeSection = document.querySelector('.mode-section');
+  if (modeSection) {
+    modeSection.classList.toggle('disabled', selectedIndex === null);
+  }
 }
 
 function onSlotClick(index) {
@@ -134,6 +140,7 @@ function onSlotClick(index) {
   }
   renderGrid();
   updateControls();
+  updateModeSectionState();
   if (selectedIndex !== null) {
     log(`Selected Button ${selectedIndex+1} (Pin ${[7,4,6,2,5,3][selectedIndex]})`);
     const mode = modes[selectedIndex] || 0;
@@ -167,6 +174,7 @@ function updateUI() {
     clearInterval(heartbeatInterval);
     heartbeatInterval = null;
   }
+  updateModeSectionState();
 }
 
 function updateControls() {
@@ -180,13 +188,13 @@ function updateControls() {
   }
   applyDualBtn.disabled = dimmed || !writer;
   copyPressToReleaseBtn.disabled = dimmed || !writer;
+  updateModeSectionState();
 }
 
 function toggleModeControls(mode) {
   if (mode === 1) {
     keyControls.style.display = 'none';
     dualControls.style.display = 'block';
-    // If entering dual mode, set default target to press
     dualTarget = 'press';
     updateDisplays();
   } else {
@@ -404,6 +412,7 @@ async function fetchAllData() {
     modes = receivedModes.map(v => (v !== undefined) ? v : 0);
     renderGrid();
     updateDisplays();
+    updateModeSectionState();
     log('Fetched all data');
   } catch (e) {
     log(`Fetch data error: ${e.message}`, true);
@@ -662,6 +671,7 @@ async function refreshAll() {
       toggleModeControls(mode);
       updateDisplays();
     }
+    updateModeSectionState();
   }
 }
 
@@ -686,6 +696,7 @@ async function resetToDefaults() {
         toggleModeControls(mode);
         updateDisplays();
       }
+      updateModeSectionState();
     } else {
       log('Reset timed out', true);
     }
@@ -712,6 +723,7 @@ async function connect() {
     renderGrid();
     updateControls();
     updateUI();
+    updateModeSectionState();
 
     if (heartbeatInterval) clearInterval(heartbeatInterval);
     heartbeatInterval = setInterval(async () => {
@@ -760,6 +772,7 @@ async function disconnect() {
   renderSocdList();
   updateUI();
   updateSocdHint();
+  updateModeSectionState();
   log('Disconnected');
 }
 
@@ -878,7 +891,6 @@ async function onKeyClick(value) {
     } else {
       await setReleaseKey(selectedIndex, value);
     }
-    // Keep mode as dual (already)
     updateDisplays();
   }
 }
@@ -980,6 +992,7 @@ buildKeyboard();
 updateUI();
 renderSocdList();
 updateSocdHint();
+updateModeSectionState();
 if (!('serial' in navigator)) {
   log('❌ Web Serial API not supported. Use Chrome/Edge.', true);
   connectBtn.disabled = true;
