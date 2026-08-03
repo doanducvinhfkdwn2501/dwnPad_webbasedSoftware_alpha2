@@ -31,16 +31,47 @@
       <span id="socdHint" class="socd-hint"></span>
     </div>
 
-    <!-- Keyboard wrapper -->
+    <!-- Mode Selector & Controls (Click‑Only) -->
+    <div class="mode-section">
+      <div class="mode-selector">
+        <span>Mode:</span>
+        <label><input type="radio" name="mode" value="0" checked /> Key</label>
+        <label><input type="radio" name="mode" value="1" /> Dual (Press + Release)</label>
+      </div>
+
+      <!-- Key Mode -->
+      <div id="keyControls" class="key-controls">
+        <span class="key-display-label">Press Key:</span>
+        <span class="key-display" id="pressKeyDisplay">—</span>
+      </div>
+
+      <!-- Dual Mode -->
+      <div id="dualControls" class="dual-controls" style="display:none;">
+        <div class="dual-displays">
+          <div>
+            <span class="key-display-label">Press:</span>
+            <span class="key-display dual-slot" id="dualPressDisplay" data-slot="press">—</span>
+          </div>
+          <div>
+            <span class="key-display-label">Release:</span>
+            <span class="key-display dual-slot" id="dualReleaseDisplay" data-slot="release">—</span>
+          </div>
+        </div>
+        <div class="dual-buttons">
+          <button id="copyPressToReleaseBtn" class="btn secondary">📋 Copy Press → Release</button>
+          <button id="applyDualBtn" class="btn primary">Apply Dual Keys</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Keyboard (for quick assignment – click any key) -->
     <div class="keyboard-wrapper">
-      <p class="keyboard-hint" id="keyboardHint">Click a button above to select it, then click a key to assign.</p>
+      <p class="keyboard-hint" id="keyboardHint">Click a button above to select it, then click any key on the keyboard to assign it.</p>
       <div class="keyboard" id="keyboard"></div>
     </div>
 
-    <!-- Custom key entry & actions -->
+    <!-- Actions -->
     <div class="action-row">
-      <input type="text" id="customKeyInput" placeholder="e.g. F13, LCTRL, ~" maxlength="15" />
-      <button id="setCustomKeyBtn" class="btn secondary">Set Custom Key</button>
       <button id="refreshBtn" class="btn secondary">Refresh</button>
       <button id="resetBtn" class="btn danger">Reset to Defaults</button>
     </div>

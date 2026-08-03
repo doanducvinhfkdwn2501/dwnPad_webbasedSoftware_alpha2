@@ -2,6 +2,7 @@
   box-sizing: border-box;
   font-family: system-ui, -apple-system, sans-serif;
 }
+
 body {
   background: #f0f2f5;
   margin: 0;
@@ -9,6 +10,7 @@ body {
   display: flex;
   justify-content: center;
 }
+
 .container {
   max-width: 1000px;
   width: 100%;
@@ -17,6 +19,7 @@ body {
   padding: 1.5rem;
   box-shadow: 0 4px 20px rgba(0,0,0,0.08);
 }
+
 header {
   display: flex;
   flex-wrap: wrap;
@@ -24,18 +27,21 @@ header {
   justify-content: space-between;
   margin-bottom: 1.5rem;
 }
+
 h1 {
   margin: 0;
   font-weight: 600;
   font-size: 1.5rem;
   color: #1e293b;
 }
+
 .status-bar {
   display: flex;
   align-items: center;
   gap: 0.75rem;
   flex-wrap: wrap;
 }
+
 .status-dot {
   width: 12px;
   height: 12px;
@@ -45,11 +51,13 @@ h1 {
   transition: background 0.2s;
 }
 .status-dot.connected { background: #22c55e; }
+
 .status-text {
   font-size: 0.9rem;
   font-weight: 500;
   color: #475569;
 }
+
 .btn {
   border: none;
   padding: 0.5rem 1rem;
@@ -59,21 +67,29 @@ h1 {
   transition: background 0.15s, opacity 0.15s;
 }
 .btn:disabled { opacity: 0.5; pointer-events: none; }
+
 .connect { background: #2563eb; color: white; }
 .connect:hover:not(:disabled) { background: #1d4ed8; }
+
 .disconnect { background: #dc2626; color: white; }
 .disconnect:hover:not(:disabled) { background: #b91c1c; }
+
 .secondary { background: #e2e8f0; color: #1e293b; }
 .secondary:hover:not(:disabled) { background: #cbd5e1; }
+
 .danger { background: #dc2626; color: white; }
 .danger:hover:not(:disabled) { background: #b91c1c; }
+
+.primary { background: #2563eb; color: white; }
+.primary:hover:not(:disabled) { background: #1d4ed8; }
 
 .button-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 1rem;
-  margin-bottom: 1rem;
+  margin-bottom: 1.5rem;
 }
+
 .btn-slot {
   background: #f8fafc;
   border: 3px solid #e2e8f0;
@@ -82,6 +98,7 @@ h1 {
   text-align: center;
   cursor: pointer;
   transition: border-color 0.2s, background 0.2s, transform 0.1s;
+  position: relative;
 }
 .btn-slot:hover { background: #f1f5f9; }
 .btn-slot.selected {
@@ -97,6 +114,30 @@ h1 {
   border-color: #22c55e;
   background: #dcfce7;
 }
+.btn-slot.socd-active {
+  border-color: #8b5cf6;
+  background: #ede9fe;
+}
+.btn-slot.socd-active::after {
+  content: "SOCD";
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  font-size: 0.5rem;
+  background: #8b5cf6;
+  color: white;
+  padding: 1px 4px;
+  border-radius: 4px;
+  font-weight: bold;
+  pointer-events: none;
+}
+.btn-slot.dual-mode .key-label {
+  color: #7c3aed;
+}
+.btn-slot.dual-mode {
+  border-color: #a78bfa;
+}
+
 .pin-label {
   display: block;
   font-size: 0.75rem;
@@ -104,13 +145,15 @@ h1 {
   font-weight: 500;
   margin-bottom: 0.25rem;
 }
+
 .key-label {
   display: block;
-  font-size: 1.5rem;
+  font-size: 1.2rem;
   font-weight: 600;
   color: #0f172a;
   font-family: 'Courier New', monospace;
   min-height: 2.5rem;
+  word-break: break-all;
 }
 
 .socd-row {
@@ -123,12 +166,14 @@ h1 {
   border-top: 1px solid #e2e8f0;
   border-bottom: 1px solid #e2e8f0;
 }
+
 .socd-list {
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
   align-items: center;
 }
+
 .socd-pair {
   background: #e2e8f0;
   padding: 0.2rem 0.6rem;
@@ -150,21 +195,91 @@ h1 {
 .socd-pair .remove-pair:hover {
   color: #b91c1c;
 }
+
 .socd-hint {
   color: #f59e0b;
   font-size: 0.9rem;
   font-weight: 500;
 }
 
+.mode-section {
+  background: #f8fafc;
+  border: 2px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 1rem;
+  margin: 0.5rem 0 1rem 0;
+}
+
+.mode-selector {
+  display: flex;
+  gap: 1.5rem;
+  align-items: center;
+  margin-bottom: 0.75rem;
+}
+.mode-selector span { font-weight: 500; color: #1e293b; }
+.mode-selector label { display: flex; align-items: center; gap: 0.3rem; cursor: pointer; }
+
+.key-controls {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+.key-controls input { flex: 1; padding: 0.4rem 0.6rem; border: 2px solid #e2e8f0; border-radius: 8px; }
+.key-controls input:focus { outline: none; border-color: #2563eb; }
+
+.dual-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.dual-inputs {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+.dual-inputs label {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  flex: 1;
+  min-width: 120px;
+}
+.dual-inputs input {
+  flex: 1;
+  padding: 0.4rem 0.6rem;
+  border: 2px solid #e2e8f0;
+  border-radius: 8px;
+}
+.dual-inputs input:focus { outline: none; border-color: #2563eb; }
+
+.action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+  margin: 1rem 0;
+}
+.action-row input {
+  flex: 1;
+  min-width: 150px;
+  padding: 0.4rem 0.6rem;
+  border: 2px solid #e2e8f0;
+  border-radius: 8px;
+  font-size: 0.9rem;
+}
+.action-row input:focus { outline: 2px solid #2563eb; border-color: transparent; }
+
 .keyboard-wrapper {
   margin: 1.5rem 0;
 }
+
 .keyboard-hint {
   font-size: 0.9rem;
   color: #64748b;
   margin: 0 0 0.5rem 0;
   text-align: center;
 }
+
 .keyboard {
   user-select: none;
   transition: opacity 0.2s, filter 0.2s;
@@ -174,6 +289,7 @@ h1 {
   filter: grayscale(0.3);
   pointer-events: none;
 }
+
 .key-row {
   display: flex;
   gap: 0.4rem;
@@ -181,6 +297,7 @@ h1 {
   margin-bottom: 0.4rem;
   flex-wrap: wrap;
 }
+
 .key {
   background: #f1f5f9;
   border: 2px solid #e2e8f0;
@@ -197,26 +314,10 @@ h1 {
 }
 .key:hover { background: #dbeafe; border-color: #93c5fd; }
 .key:active { transform: scale(0.95); }
+
 .key.wide { min-width: 4rem; }
 .key.wider { min-width: 5.5rem; }
 .key.space { min-width: 10rem; }
-
-.action-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.75rem;
-  align-items: center;
-  margin: 1rem 0;
-}
-.action-row input {
-  flex: 1;
-  min-width: 150px;
-  padding: 0.5rem 0.75rem;
-  border: 2px solid #e2e8f0;
-  border-radius: 8px;
-  font-size: 0.9rem;
-}
-.action-row input:focus { outline: 2px solid #2563eb; border-color: transparent; }
 
 .log {
   background: #1e293b;
@@ -239,32 +340,74 @@ h1 {
   .key.space { min-width: 5rem; }
   .key.wide { min-width: 3rem; }
   .key.wider { min-width: 4rem; }
+  .dual-inputs label { min-width: 100%; }
 }
-.btn-slot.socd-active {
-  border-color: #8b5cf6;
-  background: #ede9fe;
-  position: relative;
-}
-.btn-slot.socd-active::after {
-  content: "SOCD";
-  position: absolute;
-  top: 2px;
-  right: 2px;
-  font-size: 0.5rem;
-  background: #8b5cf6;
-  color: white;
-  padding: 1px 4px;
-  border-radius: 4px;
-  font-weight: bold;
-  pointer-events: none;
+/* Key display */
+.key-display-label {
+  font-weight: 500;
+  color: #475569;
+  font-size: 0.9rem;
 }
 
-/* Make sure selected state overrides but still shows badge */
-.btn-slot.selected.socd-active {
+.key-display {
+  background: #f1f5f9;
+  border: 2px solid #e2e8f0;
+  border-radius: 6px;
+  padding: 0.3rem 0.8rem;
+  font-family: 'Courier New', monospace;
+  font-weight: 600;
+  font-size: 1.1rem;
+  min-width: 4rem;
+  display: inline-block;
+  text-align: center;
+  color: #0f172a;
+}
+
+.key-controls {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.dual-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.dual-displays {
+  display: flex;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+}
+
+.dual-displays > div {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.dual-buttons {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.dual-buttons .btn {
+  padding: 0.3rem 0.8rem;
+  font-size: 0.85rem;
+}
+/* Dual slot clickable */
+.dual-slot {
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.dual-slot.active-slot {
   border-color: #2563eb;
+  background: #dbeafe;
+  box-shadow: 0 0 0 2px #2563eb33;
+}
+.dual-slot:hover {
+  border-color: #93c5fd;
   background: #eff6ff;
 }
-.btn-slot.selected.socd-active::after {
-  background: #2563eb;
-}
-

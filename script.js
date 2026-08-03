@@ -3,8 +3,14 @@ const connectBtn = document.getElementById('connectBtn');
 const disconnectBtn = document.getElementById('disconnectBtn');
 const refreshBtn = document.getElementById('refreshBtn');
 const resetBtn = document.getElementById('resetBtn');
-const setCustomKeyBtn = document.getElementById('setCustomKeyBtn');
-const customKeyInput = document.getElementById('customKeyInput');
+const pressKeyDisplay = document.getElementById('pressKeyDisplay');
+const dualPressDisplay = document.getElementById('dualPressDisplay');
+const dualReleaseDisplay = document.getElementById('dualReleaseDisplay');
+const modeRadios = document.querySelectorAll('input[name="mode"]');
+const keyControls = document.getElementById('keyControls');
+const dualControls = document.getElementById('dualControls');
+const copyPressToReleaseBtn = document.getElementById('copyPressToReleaseBtn');
+const applyDualBtn = document.getElementById('applyDualBtn');
 const statusDot = document.getElementById('statusDot');
 const statusText = document.getElementById('statusText');
 const logDiv = document.getElementById('log');
@@ -19,12 +25,16 @@ const socdHint = document.getElementById('socdHint');
 let port = null;
 let reader = null;
 let writer = null;
-let keyData = [];
+let pressKeys = [];
+let releaseKeys = [];
+let modes = [];
 let selectedIndex = null;
 let socdPairs = [];
 let socdPicking = false;
 let socdPickBuffer = [];
 let heartbeatInterval = null;
+let busy = false;
+let dualTarget = 'press'; // 'press' or 'release' – which slot is selected for assignment
 
 // ---------- Logging ----------
 function log(msg, isError = false) {
@@ -42,6 +52,13 @@ function isInSocdPair(index) {
   return socdPairs.some(pair => pair.idx1 === index || pair.idx2 === index);
 }
 
+function getDisplayLabel(idx) {
+  if (modes[idx] === 1) {
+    return `${pressKeys[idx] || '?'} → ${releaseKeys[idx] || '?'}`;
+  }
+  return pressKeys[idx] || '—';
+}
+
 // ---------- UI ----------
 function renderGrid() {
   buttonGrid.innerHTML = '';
@@ -52,17 +69,38 @@ function renderGrid() {
     if (socdPicking && socdPickBuffer.includes(i)) cls += ' socd-picked';
     else if (socdPicking) cls += ' socd-pick';
     if (isInSocdPair(i)) cls += ' socd-active';
-    
+    if (modes[i] === 1) cls += ' dual-mode';
     slot.className = cls;
     slot.dataset.index = i;
     const pinMap = [7, 4, 6, 2, 5, 3];
+    const label = getDisplayLabel(i);
     slot.innerHTML = `
       <span class="pin-label">Pin ${pinMap[i]}</span>
-      <span class="key-label" id="keyLabel${i}">${keyData[i] || '—'}</span>
+      <span class="key-label" id="keyLabel${i}">${label}</span>
     `;
     slot.addEventListener('click', () => onSlotClick(i));
     buttonGrid.appendChild(slot);
   }
+}
+
+function updateDisplays() {
+  if (selectedIndex === null) {
+    pressKeyDisplay.textContent = '—';
+    dualPressDisplay.textContent = '—';
+    dualReleaseDisplay.textContent = '—';
+    return;
+  }
+  const mode = modes[selectedIndex] || 0;
+  if (mode === 0) {
+    pressKeyDisplay.textContent = pressKeys[selectedIndex] || '—';
+  } else {
+    dualPressDisplay.textContent = pressKeys[selectedIndex] || '—';
+    dualReleaseDisplay.textContent = releaseKeys[selectedIndex] || '—';
+  }
+  // Update active slot highlight
+  document.querySelectorAll('.dual-slot').forEach(el => {
+    el.classList.toggle('active-slot', el.dataset.slot === dualTarget);
+  });
 }
 
 function onSlotClick(index) {
@@ -83,7 +121,6 @@ function onSlotClick(index) {
         socdPicking = false;
         socdPickBuffer = [];
         socdAddBtn.textContent = '➕ Add SOCD Pair';
-        renderGrid();
         updateSocdHint();
       }
     }
@@ -96,27 +133,34 @@ function onSlotClick(index) {
     selectedIndex = index;
   }
   renderGrid();
-  updateKeyboardState();
+  updateControls();
   if (selectedIndex !== null) {
     log(`Selected Button ${selectedIndex+1} (Pin ${[7,4,6,2,5,3][selectedIndex]})`);
+    const mode = modes[selectedIndex] || 0;
+    document.querySelector(`input[name="mode"][value="${mode}"]`).checked = true;
+    toggleModeControls(mode);
+    updateDisplays();
   } else {
     log('Deselected all buttons');
+    updateDisplays();
   }
 }
 
-function updateKeyLabel(index, keyName) {
+function updateKeyLabel(index) {
   const label = document.getElementById(`keyLabel${index}`);
-  if (label) label.textContent = keyName || '—';
+  if (label) label.textContent = getDisplayLabel(index);
 }
 
-function updateUI(connected) {
+function updateUI() {
+  const connected = !!writer && !busy;
   connectBtn.disabled = connected;
   disconnectBtn.disabled = !connected;
-  refreshBtn.disabled = !connected;
-  resetBtn.disabled = !connected;
-  setCustomKeyBtn.disabled = !connected || selectedIndex === null;
-  socdAddBtn.disabled = !connected;
-  socdClearBtn.disabled = !connected || socdPairs.length === 0;
+  refreshBtn.disabled = !connected || busy;
+  resetBtn.disabled = !connected || busy;
+  applyDualBtn.disabled = !connected || selectedIndex === null || busy;
+  copyPressToReleaseBtn.disabled = !connected || selectedIndex === null || busy;
+  socdAddBtn.disabled = !connected || busy;
+  socdClearBtn.disabled = !connected || socdPairs.length === 0 || busy;
   statusDot.className = 'status-dot' + (connected ? ' connected' : '');
   statusText.textContent = connected ? 'Connected' : 'Disconnected';
   if (!connected && heartbeatInterval) {
@@ -125,16 +169,31 @@ function updateUI(connected) {
   }
 }
 
-function updateKeyboardState() {
-  const dimmed = selectedIndex === null;
+function updateControls() {
+  const dimmed = selectedIndex === null || busy;
   keyboardDiv.classList.toggle('dimmed', dimmed);
   const hint = document.querySelector('.keyboard-hint');
   if (hint) {
     hint.textContent = dimmed
-      ? 'Click a button above to select it, then click a key to assign.'
-      : `Selected Button ${selectedIndex+1} – click any key to assign.`;
+      ? 'Click a button above to select it, then click any key on the keyboard to assign it.'
+      : `Selected Button ${selectedIndex+1} – click any key on the keyboard to assign.`;
   }
-  setCustomKeyBtn.disabled = dimmed || !writer;
+  applyDualBtn.disabled = dimmed || !writer;
+  copyPressToReleaseBtn.disabled = dimmed || !writer;
+}
+
+function toggleModeControls(mode) {
+  if (mode === 1) {
+    keyControls.style.display = 'none';
+    dualControls.style.display = 'block';
+    // If entering dual mode, set default target to press
+    dualTarget = 'press';
+    updateDisplays();
+  } else {
+    keyControls.style.display = 'flex';
+    dualControls.style.display = 'none';
+  }
+  updateDisplays();
 }
 
 function updateSocdHint() {
@@ -178,6 +237,25 @@ function renderSocdList() {
   updateSocdHint();
 }
 
+// ---------- Local SOCD removal ----------
+function removeSocdPairByButton(buttonIndex) {
+  let pairIndex = -1;
+  for (let i = 0; i < socdPairs.length; i++) {
+    if (socdPairs[i].idx1 === buttonIndex || socdPairs[i].idx2 === buttonIndex) {
+      pairIndex = i;
+      break;
+    }
+  }
+  if (pairIndex !== -1) {
+    socdPairs.splice(pairIndex, 1);
+    renderSocdList();
+    renderGrid();
+    updateUI();
+    updateSocdHint();
+    log(`SOCD pair removed because button ${buttonIndex+1} switched to Dual mode.`);
+  }
+}
+
 // ---------- Serial ----------
 async function sendCommand(cmd) {
   if (!writer) throw new Error('No writer');
@@ -199,7 +277,7 @@ async function readUntil(predicate, timeoutMs = 3000) {
     while (Date.now() - start < timeoutMs) {
       const { value, done } = await reader.read();
       if (done) {
-        // Port closed – return null, let caller decide
+        await disconnect();
         return null;
       }
       const chunk = new TextDecoder().decode(value);
@@ -212,16 +290,19 @@ async function readUntil(predicate, timeoutMs = 3000) {
         if (predicate(trimmed)) return trimmed;
       }
     }
+    if (writer) await disconnect();
     return null;
   } catch (e) {
     log(`Read error: ${e.message}`, true);
-    return null; // don't disconnect here, let caller handle
+    await disconnect();
+    return null;
   }
 }
 
 // ---------- Heartbeat ----------
 async function checkConnection() {
-  if (!writer) return false;
+  if (busy) return true;
+  if (!writer) { await disconnect(); return false; }
   try {
     await sendCommand('PING');
     const resp = await readUntil(line => line === 'PONG', 1000);
@@ -234,154 +315,385 @@ async function checkConnection() {
   }
 }
 
-// ---------- Fetch Keys ----------
-async function fetchAllKeys() {
-  if (!writer) return;
-  await sendCommand('GETALL');
-  let received = [];
-  let buffer = '';
-  let done = false;
-  const start = Date.now();
-  while (!done && (Date.now() - start < 3000)) {
-    const { value, done: doneRead } = await reader.read();
-    if (doneRead) return;
-    const chunk = new TextDecoder().decode(value);
-    buffer += chunk;
-    const lines = buffer.split('\n');
-    buffer = lines.pop() || '';
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed) continue;
-      log(`RX: ${trimmed}`);
-      if (trimmed === 'END') { done = true; break; }
-      if (trimmed.startsWith('KEY')) {
-        const parts = trimmed.split(':');
-        if (parts.length === 2) {
-          const idx = parseInt(parts[0].replace('KEY', '')) - 1;
-          received[idx] = parts[1];
+// ---------- Fetch all data ----------
+async function fetchAllData() {
+  if (!writer || busy) return;
+  busy = true;
+  updateUI();
+  try {
+    await sendCommand('GETPRESSALL');
+    let receivedPress = [];
+    let buffer = '';
+    let done = false;
+    const start = Date.now();
+    while (!done && (Date.now() - start < 3000)) {
+      const { value, done: doneRead } = await reader.read();
+      if (doneRead) { await disconnect(); return; }
+      const chunk = new TextDecoder().decode(value);
+      buffer += chunk;
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        log(`RX: ${trimmed}`);
+        if (trimmed === 'END') { done = true; break; }
+        if (trimmed.startsWith('PRESS')) {
+          const parts = trimmed.split(':');
+          if (parts.length === 2) {
+            const idx = parseInt(parts[0].replace('PRESS', '')) - 1;
+            receivedPress[idx] = parts[1];
+          }
         }
       }
     }
+    await sendCommand('GETRELEASEALL');
+    let receivedRelease = [];
+    buffer = '';
+    done = false;
+    const start2 = Date.now();
+    while (!done && (Date.now() - start2 < 3000)) {
+      const { value, done: doneRead } = await reader.read();
+      if (doneRead) { await disconnect(); return; }
+      const chunk = new TextDecoder().decode(value);
+      buffer += chunk;
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        log(`RX: ${trimmed}`);
+        if (trimmed === 'END') { done = true; break; }
+        if (trimmed.startsWith('RELEASE')) {
+          const parts = trimmed.split(':');
+          if (parts.length === 2) {
+            const idx = parseInt(parts[0].replace('RELEASE', '')) - 1;
+            receivedRelease[idx] = parts[1];
+          }
+        }
+      }
+    }
+    await sendCommand('GETMODEALL');
+    let receivedModes = [];
+    buffer = '';
+    done = false;
+    const start3 = Date.now();
+    while (!done && (Date.now() - start3 < 3000)) {
+      const { value, done: doneRead } = await reader.read();
+      if (doneRead) { await disconnect(); return; }
+      const chunk = new TextDecoder().decode(value);
+      buffer += chunk;
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        log(`RX: ${trimmed}`);
+        if (trimmed === 'END') { done = true; break; }
+        if (trimmed.startsWith('MODE')) {
+          const parts = trimmed.split(':');
+          if (parts.length === 2) {
+            const idx = parseInt(parts[0].replace('MODE', '')) - 1;
+            receivedModes[idx] = parseInt(parts[1]);
+          }
+        }
+      }
+    }
+    pressKeys = receivedPress.map(v => v || '');
+    releaseKeys = receivedRelease.map(v => v || '');
+    modes = receivedModes.map(v => (v !== undefined) ? v : 0);
+    renderGrid();
+    updateDisplays();
+    log('Fetched all data');
+  } catch (e) {
+    log(`Fetch data error: ${e.message}`, true);
+  } finally {
+    busy = false;
+    updateUI();
   }
-  keyData = received.map(v => v || '');
-  renderGrid();
-  log(`Fetched ${keyData.length} key mappings`);
 }
 
 // ---------- Fetch SOCD ----------
 async function fetchSocd() {
-  if (!writer) return;
-  await sendCommand('GETSOCD');
-  const resp = await readUntil(line => line.startsWith('SOCD:'), 1500);
-  if (resp) {
-    socdPairs = [];
-    if (resp !== 'SOCD:OFF') {
-      const pairsStr = resp.substring(5);
-      const parts = pairsStr.split(';');
-      for (const part of parts) {
-        const [a, b] = part.split(',').map(Number);
-        if (!isNaN(a) && !isNaN(b) && a >= 1 && a <= 6 && b >= 1 && b <= 6 && a !== b) {
-          socdPairs.push({ idx1: a-1, idx2: b-1 });
+  if (!writer || busy) return;
+  busy = true;
+  updateUI();
+  try {
+    await sendCommand('GETSOCD');
+    await new Promise(r => setTimeout(r, 50));
+    const resp = await readUntil(line => line.startsWith('SOCD:'), 1500);
+    if (resp === null) return;
+    if (resp) {
+      socdPairs = [];
+      if (resp !== 'SOCD:OFF') {
+        const pairsStr = resp.substring(5);
+        const parts = pairsStr.split(';');
+        for (const part of parts) {
+          const [a, b] = part.split(',').map(Number);
+          if (!isNaN(a) && !isNaN(b) && a >= 1 && a <= 6 && b >= 1 && b <= 6 && a !== b) {
+            socdPairs.push({ idx1: a-1, idx2: b-1 });
+          }
         }
       }
+      renderSocdList();
+      renderGrid();
+      updateUI();
+      updateSocdHint();
+    } else {
+      log('Failed to get SOCD status', true);
     }
-    renderSocdList();
-    renderGrid();
-    updateUI(true);
-    updateSocdHint();
-  } else {
-    log('Failed to get SOCD status', true);
+  } catch (e) {
+    log(`Fetch SOCD error: ${e.message}`, true);
+  } finally {
+    busy = false;
+    updateUI();
   }
 }
 
 // ---------- SOCD Actions ----------
 async function addSocdPair(idx1, idx2) {
-  if (!writer) return;
+  if (!writer || busy) return;
   if (socdPairs.length >= 2) {
     const msg = 'Maximum 2 SOCD profiles reached.';
     log(msg, true);
     socdHint.textContent = '⚠️ ' + msg;
     return;
   }
-  await sendCommand(`SOCD ADD ${idx1+1} ${idx2+1}`);
-  // Read until we see a line that starts with "OK" or "ERROR"
-  const resp = await readUntil(line => line.startsWith('OK') || line.startsWith('ERROR'), 2000);
-  if (resp && resp.startsWith('OK')) {
-    log(`Added SOCD pair: Button ${idx1+1} ↔ ${idx2+1}`);
-    await fetchSocd();
-  } else if (resp && resp.startsWith('ERROR')) {
-    log(`Failed to add SOCD pair: ${resp}`, true);
-  } else {
-    // No response or malformed – but the firmware might have saved it anyway.
-    // Re-fetch SOCD status to be sure.
-    log('No clear response – refreshing SOCD status', false);
-    await fetchSocd();
+  if (isInSocdPair(idx1) || isInSocdPair(idx2)) {
+    log('One of these buttons is already in a SOCD pair', true);
+    return;
+  }
+  busy = true;
+  updateUI();
+  try {
+    await sendCommand(`SOCD ADD ${idx1+1} ${idx2+1}`);
+    await new Promise(r => setTimeout(r, 50));
+    const resp = await readUntil(line => line.startsWith('OK') || line.startsWith('ERROR'), 2000);
+    if (resp === null) return;
+    if (resp && resp.startsWith('OK')) {
+      socdPairs.push({ idx1, idx2 });
+      renderSocdList();
+      renderGrid();
+      updateUI();
+      updateSocdHint();
+      log(`Added SOCD pair: Button ${idx1+1} ↔ ${idx2+1}`);
+    } else if (resp && resp.startsWith('ERROR')) {
+      log(`Failed to add SOCD pair: ${resp}`, true);
+    } else {
+      log('No clear response – refreshing SOCD status', false);
+      await fetchSocd();
+    }
+  } catch (e) {
+    log(`Add SOCD error: ${e.message}`, true);
+  } finally {
+    busy = false;
+    updateUI();
   }
 }
 
 async function removeSocdPair(index) {
-  if (!writer) return;
-  await sendCommand(`SOCD REMOVE ${index+1}`);
-  const resp = await readUntil(line => line.startsWith('OK') || line.startsWith('ERROR'), 2000);
-  if (resp && resp.startsWith('OK')) {
-    log(`Removed SOCD pair ${index+1}`);
-    await fetchSocd();
-  } else if (resp && resp.startsWith('ERROR')) {
-    log(`Failed to remove SOCD pair: ${resp}`, true);
-  } else {
-    log('No clear response – refreshing SOCD status', false);
-    await fetchSocd();
+  if (!writer || busy) return;
+  busy = true;
+  updateUI();
+  try {
+    await sendCommand(`SOCD REMOVE ${index+1}`);
+    await new Promise(r => setTimeout(r, 50));
+    const resp = await readUntil(line => line.startsWith('OK') || line.startsWith('ERROR'), 2000);
+    if (resp === null) return;
+    if (resp && resp.startsWith('OK')) {
+      socdPairs.splice(index, 1);
+      renderSocdList();
+      renderGrid();
+      updateUI();
+      updateSocdHint();
+      log(`Removed SOCD pair ${index+1}`);
+    } else if (resp && resp.startsWith('ERROR')) {
+      log(`Failed to remove SOCD pair: ${resp}`, true);
+    } else {
+      log('No clear response – refreshing SOCD status', false);
+      await fetchSocd();
+    }
+  } catch (e) {
+    log(`Remove SOCD error: ${e.message}`, true);
+  } finally {
+    busy = false;
+    updateUI();
   }
 }
 
 async function clearAllSocd() {
-  if (!writer) return;
-  await sendCommand('SOCD CLEAR');
-  const resp = await readUntil(line => line.startsWith('OK') || line.startsWith('ERROR'), 2000);
-  if (resp && resp.startsWith('OK')) {
-    log('Cleared all SOCD pairs');
-    await fetchSocd();
-  } else if (resp && resp.startsWith('ERROR')) {
-    log(`Failed to clear SOCD: ${resp}`, true);
-  } else {
-    log('No clear response – refreshing SOCD status', false);
-    await fetchSocd();
+  if (!writer || busy) return;
+  busy = true;
+  updateUI();
+  try {
+    await sendCommand('SOCD CLEAR');
+    await new Promise(r => setTimeout(r, 50));
+    const resp = await readUntil(line => line.startsWith('OK') || line.startsWith('ERROR'), 2000);
+    if (resp === null) return;
+    if (resp && resp.startsWith('OK')) {
+      socdPairs = [];
+      renderSocdList();
+      renderGrid();
+      updateUI();
+      updateSocdHint();
+      log('Cleared all SOCD pairs');
+    } else if (resp && resp.startsWith('ERROR')) {
+      log(`Failed to clear SOCD: ${resp}`, true);
+    } else {
+      log('No clear response – refreshing SOCD status', false);
+      await fetchSocd();
+    }
+  } catch (e) {
+    log(`Clear SOCD error: ${e.message}`, true);
+  } finally {
+    busy = false;
+    updateUI();
   }
 }
 
-// ---------- Key Assignment ----------
-async function assignKey(index, keyName) {
+// ---------- Set Press Key ----------
+async function setPressKey(index, keyName) {
   if (index < 0 || index > 5) return false;
-  if (!writer) return false;
-  if (keyName === keyData[index]) {
-    log(`Key for Button ${index+1} is already "${keyName}"`);
-    return true;
-  }
-  await sendCommand(`SETKEY${index+1}:${keyName}`);
-  const resp = await readUntil(line => line === 'OK', 1500);
-  if (resp === 'OK') {
-    keyData[index] = keyName;
-    updateKeyLabel(index, keyName);
-    log(`Assigned "${keyName}" to Button ${index+1}`);
-    return true;
-  } else {
-    log(`Failed to assign "${keyName}" to Button ${index+1}`, true);
+  if (!writer || busy) return false;
+  busy = true;
+  updateUI();
+  try {
+    await sendCommand(`SETPRESS ${index+1}:${keyName}`);
+    await new Promise(r => setTimeout(r, 50));
+    const resp = await readUntil(line => line === 'OK', 1500);
+    if (resp === null) return false;
+    if (resp === 'OK') {
+      pressKeys[index] = keyName;
+      updateKeyLabel(index);
+      updateDisplays();
+      log(`Set press key for Button ${index+1}: "${keyName}"`);
+      await new Promise(r => setTimeout(r, 50));
+      await fetchSocd();
+      renderGrid();
+      return true;
+    } else {
+      log(`Failed to set press key: ${resp}`, true);
+      return false;
+    }
+  } catch (e) {
+    log(`Set press error: ${e.message}`, true);
     return false;
+  } finally {
+    busy = false;
+    updateUI();
+  }
+}
+
+async function setReleaseKey(index, keyName) {
+  if (index < 0 || index > 5) return false;
+  if (!writer || busy) return false;
+  busy = true;
+  updateUI();
+  try {
+    await sendCommand(`SETRELEASE ${index+1}:${keyName}`);
+    await new Promise(r => setTimeout(r, 50));
+    const resp = await readUntil(line => line === 'OK', 1500);
+    if (resp === null) return false;
+    if (resp === 'OK') {
+      releaseKeys[index] = keyName;
+      updateKeyLabel(index);
+      updateDisplays();
+      log(`Set release key for Button ${index+1}: "${keyName}"`);
+      return true;
+    } else {
+      log(`Failed to set release key: ${resp}`, true);
+      return false;
+    }
+  } catch (e) {
+    log(`Set release error: ${e.message}`, true);
+    return false;
+  } finally {
+    busy = false;
+    updateUI();
+  }
+}
+
+async function setMode(index, modeVal) {
+  if (index < 0 || index > 5) return false;
+  if (!writer || busy) return false;
+  if (modeVal === modes[index]) return true;
+  
+  if (modeVal === 1) {
+    removeSocdPairByButton(index);
+  }
+  
+  busy = true;
+  updateUI();
+  try {
+    await sendCommand(`SETMODE ${index+1}:${modeVal}`);
+    await new Promise(r => setTimeout(r, 50));
+    const resp = await readUntil(line => line === 'OK', 1500);
+    if (resp === null) return false;
+    if (resp === 'OK') {
+      modes[index] = modeVal;
+      updateKeyLabel(index);
+      updateDisplays();
+      log(`Set mode for Button ${index+1} to ${modeVal === 0 ? 'Key' : 'Dual'}`);
+      await new Promise(r => setTimeout(r, 50));
+      await fetchSocd();
+      renderGrid();
+      return true;
+    } else {
+      log(`Failed to set mode: ${resp}`, true);
+      return false;
+    }
+  } catch (e) {
+    log(`Set mode error: ${e.message}`, true);
+    return false;
+  } finally {
+    busy = false;
+    updateUI();
+  }
+}
+
+// ---------- Refresh ----------
+async function refreshAll() {
+  if (writer && !busy) {
+    await fetchAllData();
+    await fetchSocd();
+    if (selectedIndex !== null) {
+      const mode = modes[selectedIndex] || 0;
+      document.querySelector(`input[name="mode"][value="${mode}"]`).checked = true;
+      toggleModeControls(mode);
+      updateDisplays();
+    }
   }
 }
 
 // ---------- Reset ----------
 async function resetToDefaults() {
-  if (!writer) return;
-  if (!confirm('Reset all keys to defaults (q,w,e,a,s,d) and clear SOCD pairs?')) return;
-  await sendCommand('RESET');
-  const resp = await readUntil(line => line === 'OK RESET', 2000);
-  if (resp) {
-    log('Reset to defaults');
-    await fetchAllKeys();
-    await fetchSocd();
-  } else {
-    log('Reset timed out', true);
+  if (!writer || busy) return;
+  if (!confirm('Reset all keys to defaults (q,w,e,a,s,d) and clear SOCD?')) return;
+  busy = true;
+  updateUI();
+  try {
+    await sendCommand('RESET');
+    const resp = await readUntil(line => line === 'OK RESET', 2000);
+    if (resp === null) return;
+    if (resp) {
+      log('Reset to defaults');
+      busy = false;
+      await fetchAllData();
+      await fetchSocd();
+      if (selectedIndex !== null) {
+        const mode = modes[selectedIndex] || 0;
+        document.querySelector(`input[name="mode"][value="${mode}"]`).checked = true;
+        toggleModeControls(mode);
+        updateDisplays();
+      }
+    } else {
+      log('Reset timed out', true);
+    }
+  } catch (e) {
+    log(`Reset error: ${e.message}`, true);
+  } finally {
+    busy = false;
+    updateUI();
   }
 }
 
@@ -392,16 +704,14 @@ async function connect() {
     await port.open({ baudRate: 9600 });
     writer = port.writable.getWriter();
     reader = port.readable.getReader();
-    updateUI(true);
+    updateUI();
     log('Connected to Arduino');
     await new Promise(r => setTimeout(r, 50));
-    await fetchAllKeys();
-    await fetchSocd();
+    await refreshAll();
     selectedIndex = null;
     renderGrid();
-    updateKeyboardState();
-    updateUI(true);
-    updateSocdHint();
+    updateControls();
+    updateUI();
 
     if (heartbeatInterval) clearInterval(heartbeatInterval);
     heartbeatInterval = setInterval(async () => {
@@ -427,29 +737,28 @@ async function disconnect() {
     clearInterval(heartbeatInterval);
     heartbeatInterval = null;
   }
+  const oldReader = reader;
+  const oldWriter = writer;
+  const oldPort = port;
+  reader = null;
+  writer = null;
+  port = null;
+  busy = false;
   try {
-    if (reader) {
-      await reader.cancel();
-      reader = null;
-    }
-    if (writer) {
-      await writer.close();
-      writer = null;
-    }
-    if (port) {
-      await port.close();
-      port = null;
-    }
+    if (oldReader) await oldReader.cancel();
+    if (oldWriter) await oldWriter.close();
+    if (oldPort) await oldPort.close();
   } catch (e) { /* ignore */ }
-  keyData = [];
+  pressKeys = [];
+  releaseKeys = [];
+  modes = [];
   selectedIndex = null;
   socdPairs = [];
   socdPicking = false;
   socdPickBuffer = [];
   renderGrid();
-  updateKeyboardState();
   renderSocdList();
-  updateUI(false);
+  updateUI();
   updateSocdHint();
   log('Disconnected');
 }
@@ -463,6 +772,8 @@ function buildKeyboard() {
       { label: 'F4', value: 'F4' }, { label: 'F5', value: 'F5' }, { label: 'F6', value: 'F6' },
       { label: 'F7', value: 'F7' }, { label: 'F8', value: 'F8' }, { label: 'F9', value: 'F9' },
       { label: 'F10', value: 'F10' }, { label: 'F11', value: 'F11' }, { label: 'F12', value: 'F12' },
+      { label: 'F13', value: 'F13' }, { label: 'F14', value: 'F14' }, { label: 'F15', value: 'F15' },
+      { label: 'F16', value: 'F16' }, { label: 'F17', value: 'F17' }, { label: 'F18', value: 'F18' },
     ],
     [
       { label: '`', value: '`' }, { label: '~', value: '~' },
@@ -544,35 +855,99 @@ function buildKeyboard() {
 // ---------- Key Click ----------
 async function onKeyClick(value) {
   if (selectedIndex === null) {
-    log('Please select a button first (click one of the 6 squares)');
+    log('Please select a button first');
     return;
   }
-  if (!writer) {
-    log('Not connected to Arduino');
+  if (!writer || busy) {
+    log('Not connected or busy');
     return;
   }
-  await assignKey(selectedIndex, value);
+  const mode = modes[selectedIndex] || 0;
+  if (mode === 0) {
+    // Key mode: set press key and switch to Key mode (if not already)
+    await setPressKey(selectedIndex, value);
+    if (modes[selectedIndex] !== 0) {
+      await setMode(selectedIndex, 0);
+    }
+    document.querySelector('input[name="mode"][value="0"]').checked = true;
+    toggleModeControls(0);
+  } else {
+    // Dual mode: assign to the selected slot (press or release)
+    if (dualTarget === 'press') {
+      await setPressKey(selectedIndex, value);
+    } else {
+      await setReleaseKey(selectedIndex, value);
+    }
+    // Keep mode as dual (already)
+    updateDisplays();
+  }
 }
 
-// ---------- Custom Key ----------
-async function setCustomKey() {
-  if (selectedIndex === null) {
-    log('Select a button first');
-    return;
-  }
-  const val = customKeyInput.value.trim();
-  if (!val) {
-    log('Enter a key name');
-    return;
-  }
-  await assignKey(selectedIndex, val);
-  customKeyInput.value = '';
-}
+// ---------- Event Handlers ----------
+modeRadios.forEach(radio => {
+  radio.addEventListener('change', () => {
+    if (selectedIndex === null) return;
+    const mode = parseInt(document.querySelector('input[name="mode"]:checked').value);
+    toggleModeControls(mode);
+    setMode(selectedIndex, mode);
+  });
+});
 
-// ---------- SOCD Toggle ----------
+// Click on dual display to change target
+document.querySelectorAll('.dual-slot').forEach(el => {
+  el.addEventListener('click', () => {
+    if (selectedIndex === null) return;
+    if (modes[selectedIndex] !== 1) return;
+    const slot = el.dataset.slot;
+    if (slot === 'press' || slot === 'release') {
+      dualTarget = slot;
+      updateDisplays();
+      log(`Dual target set to: ${slot}`);
+    }
+  });
+});
+
+copyPressToReleaseBtn.addEventListener('click', async () => {
+  if (selectedIndex === null) { log('Select a button first'); return; }
+  if (!writer || busy) { log('Not connected or busy'); return; }
+  const press = pressKeys[selectedIndex] || '';
+  if (!press) { log('No press key to copy'); return; }
+  await setReleaseKey(selectedIndex, press);
+  if (modes[selectedIndex] !== 1) {
+    await setMode(selectedIndex, 1);
+    document.querySelector('input[name="mode"][value="1"]').checked = true;
+    toggleModeControls(1);
+  }
+});
+
+applyDualBtn.addEventListener('click', async () => {
+  if (selectedIndex === null) { log('Select a button first'); return; }
+  if (!writer || busy) { log('Not connected or busy'); return; }
+  const press = pressKeys[selectedIndex] || '';
+  const release = releaseKeys[selectedIndex] || '';
+  if (!press || !release) { log('Both press and release keys are required'); return; }
+  if (modes[selectedIndex] !== 1) {
+    await setMode(selectedIndex, 1);
+  }
+  document.querySelector('input[name="mode"][value="1"]').checked = true;
+  toggleModeControls(1);
+});
+
+refreshBtn.addEventListener('click', async () => {
+  if (writer && !busy) { await refreshAll(); }
+});
+resetBtn.addEventListener('click', resetToDefaults);
+
+socdAddBtn.addEventListener('click', toggleSocdPicking);
+socdClearBtn.addEventListener('click', async () => {
+  if (writer && !busy) {
+    if (confirm('Remove all SOCD pairs?')) await clearAllSocd();
+  }
+});
+
 function toggleSocdPicking() {
-  if (!writer) {
-    log('Not connected to Arduino');
+  if (!writer || busy) {
+    log('Not connected or busy');
     return;
   }
   if (socdPairs.length >= 2) {
@@ -597,31 +972,12 @@ function toggleSocdPicking() {
   log('SOCD pairing mode: click two buttons to create a new pair.');
 }
 
-// ---------- Events ----------
 connectBtn.addEventListener('click', connect);
 disconnectBtn.addEventListener('click', disconnect);
-refreshBtn.addEventListener('click', async () => {
-  if (writer) {
-    await fetchAllKeys();
-    await fetchSocd();
-  }
-});
-resetBtn.addEventListener('click', resetToDefaults);
-setCustomKeyBtn.addEventListener('click', setCustomKey);
-customKeyInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') setCustomKey(); });
-socdAddBtn.addEventListener('click', toggleSocdPicking);
-socdClearBtn.addEventListener('click', async () => {
-  if (writer) {
-    if (confirm('Remove all SOCD pairs?')) {
-      await clearAllSocd();
-    }
-  }
-});
 
 // ---------- Init ----------
 buildKeyboard();
-updateUI(false);
-updateKeyboardState();
+updateUI();
 renderSocdList();
 updateSocdHint();
 if (!('serial' in navigator)) {
