@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>dwnPad Key Changer</title>
+  <title>dwnPad Software</title>
   <link rel="stylesheet" href="style.css" />
 </head>
 
@@ -31,7 +31,7 @@
       <span id="socdHint" class="socd-hint"></span>
     </div>
 
-    <!-- Mode Selector & Controls (Click‑Only) -->
+    <!-- Mode Selector & Controls -->
     <div class="mode-section">
       <div class="mode-selector">
         <span>Mode:</span>
@@ -66,20 +66,28 @@
 
       <!-- Macro Mode -->
       <div id="macroControls" class="macro-controls" style="display:none;">
+        <div class="profile-manager">
+          <button id="addProfileBtn" class="btn primary">➕ Add Profile</button>
+          <input type="text" id="profileNameInput" placeholder="New profile name" maxlength="30" />
+          <button id="deleteProfileBtn" class="btn danger">🗑️ Delete</button>
+          <select id="profileSelect"></select>
+          <button id="loadProfileBtn" class="btn secondary">📂 Load</button>
+        </div>
+
         <div class="macro-steps" id="macroSteps">
-          <!-- Steps will be rendered by JS -->
+          <!-- Steps rendered by JS -->
         </div>
         <div class="macro-actions">
           <button id="addStepBtn" class="btn secondary">➕ Add Step</button>
           <button id="clearMacroBtn" class="btn danger">✖ Clear Macro</button>
-          <button id="applyMacroBtn" class="btn primary">Apply Macro</button>
+          <button id="applyMacroBtn" class="btn primary">💾 Save to Arduino</button>
         </div>
       </div>
     </div>
 
-    <!-- Keyboard (for quick assignment – click any key) -->
+    <!-- Keyboard -->
     <div class="keyboard-wrapper">
-      <p class="keyboard-hint" id="keyboardHint">Click a button above to select it, then click any key on the keyboard to assign it.</p>
+      <p class="keyboard-hint" id="keyboardHint">Click a button above to select it, then click a key to assign it.</p>
       <div class="keyboard" id="keyboard"></div>
     </div>
 
