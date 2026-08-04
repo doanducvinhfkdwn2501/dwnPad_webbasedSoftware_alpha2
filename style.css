@@ -137,6 +137,12 @@ h1 {
 .btn-slot.dual-mode {
   border-color: #a78bfa;
 }
+.btn-slot.macro-mode .key-label {
+  color: #059669;
+}
+.btn-slot.macro-mode {
+  border-color: #34d399;
+}
 
 .pin-label {
   display: block;
@@ -210,48 +216,196 @@ h1 {
   margin: 0.5rem 0 1rem 0;
 }
 
+.mode-section.disabled {
+  opacity: 0.5;
+  pointer-events: none;
+  transition: opacity 0.2s;
+}
+
 .mode-selector {
   display: flex;
   gap: 1.5rem;
   align-items: center;
   margin-bottom: 0.75rem;
+  flex-wrap: wrap;
 }
 .mode-selector span { font-weight: 500; color: #1e293b; }
 .mode-selector label { display: flex; align-items: center; gap: 0.3rem; cursor: pointer; }
 
+/* ----- Key Mode ----- */
 .key-controls {
   display: flex;
-  gap: 0.5rem;
+  gap: 0.75rem;
   align-items: center;
 }
-.key-controls input { flex: 1; padding: 0.4rem 0.6rem; border: 2px solid #e2e8f0; border-radius: 8px; }
-.key-controls input:focus { outline: none; border-color: #2563eb; }
 
+/* ----- Dual Mode ----- */
 .dual-controls {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
 }
-.dual-inputs {
+
+.dual-displays {
   display: flex;
-  gap: 1rem;
+  gap: 1.5rem;
   flex-wrap: wrap;
 }
-.dual-inputs label {
+
+.dual-displays > div {
   display: flex;
   align-items: center;
-  gap: 0.3rem;
-  flex: 1;
-  min-width: 120px;
+  gap: 0.5rem;
 }
-.dual-inputs input {
-  flex: 1;
-  padding: 0.4rem 0.6rem;
-  border: 2px solid #e2e8f0;
-  border-radius: 8px;
-}
-.dual-inputs input:focus { outline: none; border-color: #2563eb; }
 
+.dual-buttons {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.dual-buttons .btn {
+  padding: 0.3rem 0.8rem;
+  font-size: 0.85rem;
+}
+
+/* Dual slot clickable */
+.dual-slot {
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.dual-slot.active-slot {
+  border-color: #2563eb;
+  background: #dbeafe;
+  box-shadow: 0 0 0 2px #2563eb33;
+}
+.dual-slot:hover {
+  border-color: #93c5fd;
+  background: #eff6ff;
+}
+
+/* ----- Macro Mode ----- */
+.macro-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.macro-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  max-height: 220px;
+  overflow-y: auto;
+  padding: 0.5rem;
+  background: #f1f5f9;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+  min-height: 60px;
+}
+
+.macro-step {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: white;
+  padding: 0.3rem 0.6rem;
+  border-radius: 6px;
+  border: 2px solid #e2e8f0;
+  font-size: 0.85rem;
+  transition: border-color 0.15s, background 0.15s;
+}
+.macro-step.selected {
+  border-color: #2563eb;
+  background: #eff6ff;
+}
+.macro-step .step-index {
+  font-weight: bold;
+  color: #64748b;
+  min-width: 1.8rem;
+  font-size: 0.8rem;
+}
+.macro-step select {
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  padding: 0.15rem 0.3rem;
+  font-size: 0.8rem;
+  background: white;
+}
+.macro-step input[type="number"] {
+  width: 60px;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  padding: 0.15rem 0.3rem;
+  font-size: 0.8rem;
+}
+.macro-step .step-key {
+  background: #e2e8f0;
+  padding: 0.1rem 0.5rem;
+  border-radius: 4px;
+  font-family: 'Courier New', monospace;
+  font-weight: 600;
+  font-size: 0.9rem;
+  cursor: pointer;
+  min-width: 2.5rem;
+  text-align: center;
+  transition: background 0.15s, border-color 0.15s;
+  border: 2px solid transparent;
+}
+.macro-step .step-key:hover {
+  background: #dbeafe;
+  border-color: #93c5fd;
+}
+.macro-step .step-key.active-step-key {
+  border-color: #2563eb;
+  background: #dbeafe;
+  box-shadow: 0 0 0 2px #2563eb33;
+}
+.macro-step .remove-step {
+  background: none;
+  border: none;
+  color: #dc2626;
+  cursor: pointer;
+  font-size: 1.1rem;
+  margin-left: auto;
+  padding: 0 0.2rem;
+}
+.macro-step .remove-step:hover {
+  color: #b91c1c;
+}
+
+.macro-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.macro-actions .btn {
+  padding: 0.3rem 0.8rem;
+  font-size: 0.85rem;
+}
+
+/* Key display (shared) */
+.key-display-label {
+  font-weight: 500;
+  color: #475569;
+  font-size: 0.9rem;
+}
+
+.key-display {
+  background: #f1f5f9;
+  border: 2px solid #e2e8f0;
+  border-radius: 6px;
+  padding: 0.3rem 0.8rem;
+  font-family: 'Courier New', monospace;
+  font-weight: 600;
+  font-size: 1.1rem;
+  min-width: 4rem;
+  display: inline-block;
+  text-align: center;
+  color: #0f172a;
+}
+
+/* ----- Actions ----- */
 .action-row {
   display: flex;
   flex-wrap: wrap;
@@ -269,6 +423,7 @@ h1 {
 }
 .action-row input:focus { outline: 2px solid #2563eb; border-color: transparent; }
 
+/* ----- Keyboard ----- */
 .keyboard-wrapper {
   margin: 1.5rem 0;
 }
@@ -319,6 +474,7 @@ h1 {
 .key.wider { min-width: 5.5rem; }
 .key.space { min-width: 10rem; }
 
+/* ----- Log ----- */
 .log {
   background: #1e293b;
   color: #e2e8f0;
@@ -334,86 +490,15 @@ h1 {
 }
 .log-empty { color: #94a3b8; }
 
+/* ----- Responsive ----- */
 @media (max-width: 700px) {
   .button-grid { grid-template-columns: repeat(2, 1fr); }
   .key { min-width: 2rem; font-size: 0.7rem; padding: 0.3rem 0.1rem; }
   .key.space { min-width: 5rem; }
   .key.wide { min-width: 3rem; }
   .key.wider { min-width: 4rem; }
-  .dual-inputs label { min-width: 100%; }
-}
-/* Key display */
-.key-display-label {
-  font-weight: 500;
-  color: #475569;
-  font-size: 0.9rem;
-}
-
-.key-display {
-  background: #f1f5f9;
-  border: 2px solid #e2e8f0;
-  border-radius: 6px;
-  padding: 0.3rem 0.8rem;
-  font-family: 'Courier New', monospace;
-  font-weight: 600;
-  font-size: 1.1rem;
-  min-width: 4rem;
-  display: inline-block;
-  text-align: center;
-  color: #0f172a;
-}
-
-.key-controls {
-  display: flex;
-  gap: 0.75rem;
-  align-items: center;
-}
-
-.dual-controls {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-.dual-displays {
-  display: flex;
-  gap: 1.5rem;
-  flex-wrap: wrap;
-}
-
-.dual-displays > div {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.dual-buttons {
-  display: flex;
-  gap: 0.5rem;
-  flex-wrap: wrap;
-}
-
-.dual-buttons .btn {
-  padding: 0.3rem 0.8rem;
-  font-size: 0.85rem;
-}
-/* Dual slot clickable */
-.dual-slot {
-  cursor: pointer;
-  transition: border-color 0.15s, background 0.15s;
-}
-.dual-slot.active-slot {
-  border-color: #2563eb;
-  background: #dbeafe;
-  box-shadow: 0 0 0 2px #2563eb33;
-}
-.dual-slot:hover {
-  border-color: #93c5fd;
-  background: #eff6ff;
-}
-/* Disabled mode section */
-.mode-section.disabled {
-  opacity: 0.5;
-  pointer-events: none;
-  transition: opacity 0.2s;
+  .dual-displays > div { flex-wrap: wrap; }
+  .mode-selector { gap: 0.8rem; }
+  .macro-step { flex-wrap: wrap; gap: 0.3rem; }
+  .macro-step input[type="number"] { width: 50px; }
 }

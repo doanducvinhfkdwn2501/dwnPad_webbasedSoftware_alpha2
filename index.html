@@ -37,6 +37,7 @@
         <span>Mode:</span>
         <label><input type="radio" name="mode" value="0" checked /> Key</label>
         <label><input type="radio" name="mode" value="1" /> Dual (Press + Release)</label>
+        <label><input type="radio" name="mode" value="2" /> Macro</label>
       </div>
 
       <!-- Key Mode -->
@@ -60,6 +61,18 @@
         <div class="dual-buttons">
           <button id="copyPressToReleaseBtn" class="btn secondary">📋 Copy Press → Release</button>
           <button id="applyDualBtn" class="btn primary">Apply Dual Keys</button>
+        </div>
+      </div>
+
+      <!-- Macro Mode -->
+      <div id="macroControls" class="macro-controls" style="display:none;">
+        <div class="macro-steps" id="macroSteps">
+          <!-- Steps will be rendered by JS -->
+        </div>
+        <div class="macro-actions">
+          <button id="addStepBtn" class="btn secondary">➕ Add Step</button>
+          <button id="clearMacroBtn" class="btn danger">✖ Clear Macro</button>
+          <button id="applyMacroBtn" class="btn primary">Apply Macro</button>
         </div>
       </div>
     </div>

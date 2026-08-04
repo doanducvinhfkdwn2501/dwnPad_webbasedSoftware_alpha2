@@ -9,6 +9,11 @@ const dualReleaseDisplay = document.getElementById('dualReleaseDisplay');
 const modeRadios = document.querySelectorAll('input[name="mode"]');
 const keyControls = document.getElementById('keyControls');
 const dualControls = document.getElementById('dualControls');
+const macroControls = document.getElementById('macroControls');
+const macroStepsDiv = document.getElementById('macroSteps');
+const addStepBtn = document.getElementById('addStepBtn');
+const clearMacroBtn = document.getElementById('clearMacroBtn');
+const applyMacroBtn = document.getElementById('applyMacroBtn');
 const copyPressToReleaseBtn = document.getElementById('copyPressToReleaseBtn');
 const applyDualBtn = document.getElementById('applyDualBtn');
 const statusDot = document.getElementById('statusDot');
@@ -34,7 +39,9 @@ let socdPicking = false;
 let socdPickBuffer = [];
 let heartbeatInterval = null;
 let busy = false;
-let dualTarget = 'press'; // 'press' or 'release'
+let dualTarget = 'press';
+let macroData = []; // array of { steps: [ { action, key, delay } ] }
+let selectedStepIndex = null;
 
 // ---------- Logging ----------
 function log(msg, isError = false) {
@@ -55,8 +62,40 @@ function isInSocdPair(index) {
 function getDisplayLabel(idx) {
   if (modes[idx] === 1) {
     return `${pressKeys[idx] || '?'} → ${releaseKeys[idx] || '?'}`;
+  } else if (modes[idx] === 2) {
+    const steps = macroData[idx]?.steps || [];
+    if (steps.length === 0) return 'M: ∅';
+    const labels = steps.map(step => {
+      if (step.action === 'D') return `⏱${step.delay}`;
+      return step.key || '?';
+    });
+    return `M: ${labels.join(' ')}`;
   }
   return pressKeys[idx] || '—';
+}
+
+// ---------- renderSocdList (FIXED - moved before use) ----------
+function renderSocdList() {
+  socdList.innerHTML = '';
+  if (socdPairs.length === 0) {
+    socdList.innerHTML = '<span style="color:#94a3b8; font-size:0.9rem;">No SOCD pairs</span>';
+    return;
+  }
+  socdPairs.forEach((pair, idx) => {
+    const el = document.createElement('span');
+    el.className = 'socd-pair';
+    el.innerHTML = `
+      Button ${pair.idx1+1} ↔ ${pair.idx2+1}
+      <button class="remove-pair" data-index="${idx}">✕</button>
+    `;
+    el.querySelector('.remove-pair').addEventListener('click', (e) => {
+      e.stopPropagation();
+      const i = parseInt(e.target.dataset.index);
+      removeSocdPair(i);
+    });
+    socdList.appendChild(el);
+  });
+  updateSocdHint();
 }
 
 // ---------- UI ----------
@@ -70,6 +109,7 @@ function renderGrid() {
     else if (socdPicking) cls += ' socd-pick';
     if (isInSocdPair(i)) cls += ' socd-active';
     if (modes[i] === 1) cls += ' dual-mode';
+    if (modes[i] === 2) cls += ' macro-mode';
     slot.className = cls;
     slot.dataset.index = i;
     const pinMap = [7, 4, 6, 2, 5, 3];
@@ -93,13 +133,16 @@ function updateDisplays() {
   const mode = modes[selectedIndex] || 0;
   if (mode === 0) {
     pressKeyDisplay.textContent = pressKeys[selectedIndex] || '—';
-  } else {
+  } else if (mode === 1) {
     dualPressDisplay.textContent = pressKeys[selectedIndex] || '—';
     dualReleaseDisplay.textContent = releaseKeys[selectedIndex] || '—';
   }
   document.querySelectorAll('.dual-slot').forEach(el => {
     el.classList.toggle('active-slot', el.dataset.slot === dualTarget);
   });
+  if (mode === 2 && selectedIndex !== null) {
+    renderMacroEditor(selectedIndex);
+  }
 }
 
 function updateModeSectionState() {
@@ -135,8 +178,11 @@ function onSlotClick(index) {
 
   if (selectedIndex === index) {
     selectedIndex = null;
+    selectedStepIndex = null;
   } else {
     selectedIndex = index;
+    selectedStepIndex = null;
+    if (!macroData[selectedIndex]) macroData[selectedIndex] = { steps: [] };
   }
   renderGrid();
   updateControls();
@@ -166,6 +212,9 @@ function updateUI() {
   resetBtn.disabled = !connected || busy;
   applyDualBtn.disabled = !connected || selectedIndex === null || busy;
   copyPressToReleaseBtn.disabled = !connected || selectedIndex === null || busy;
+  applyMacroBtn.disabled = !connected || selectedIndex === null || busy || modes[selectedIndex] !== 2;
+  addStepBtn.disabled = !connected || selectedIndex === null || busy || modes[selectedIndex] !== 2;
+  clearMacroBtn.disabled = !connected || selectedIndex === null || busy || modes[selectedIndex] !== 2;
   socdAddBtn.disabled = !connected || busy;
   socdClearBtn.disabled = !connected || socdPairs.length === 0 || busy;
   statusDot.className = 'status-dot' + (connected ? ' connected' : '');
@@ -182,24 +231,41 @@ function updateControls() {
   keyboardDiv.classList.toggle('dimmed', dimmed);
   const hint = document.querySelector('.keyboard-hint');
   if (hint) {
+    let modeText = '';
+    if (selectedIndex !== null) {
+      const mode = modes[selectedIndex] || 0;
+      if (mode === 0) modeText = 'Key mode – click a key to assign it.';
+      else if (mode === 1) modeText = 'Dual mode – select a slot (Press/Release) then click a key.';
+      else if (mode === 2) modeText = 'Macro mode – click a step\'s key display to select it, then click a key to assign.';
+    }
     hint.textContent = dimmed
-      ? 'Click a button above to select it, then click any key on the keyboard to assign it.'
-      : `Selected Button ${selectedIndex+1} – click any key on the keyboard to assign.`;
+      ? 'Click a button above to select it.'
+      : `Selected Button ${selectedIndex+1} – ${modeText}`;
   }
   applyDualBtn.disabled = dimmed || !writer;
   copyPressToReleaseBtn.disabled = dimmed || !writer;
+  applyMacroBtn.disabled = dimmed || !writer || (selectedIndex !== null && modes[selectedIndex] !== 2);
+  addStepBtn.disabled = dimmed || !writer || (selectedIndex !== null && modes[selectedIndex] !== 2);
+  clearMacroBtn.disabled = dimmed || !writer || (selectedIndex !== null && modes[selectedIndex] !== 2);
   updateModeSectionState();
 }
 
 function toggleModeControls(mode) {
+  keyControls.style.display = 'none';
+  dualControls.style.display = 'none';
+  macroControls.style.display = 'none';
   if (mode === 1) {
-    keyControls.style.display = 'none';
     dualControls.style.display = 'block';
     dualTarget = 'press';
     updateDisplays();
+  } else if (mode === 2) {
+    macroControls.style.display = 'block';
+    if (selectedIndex !== null) {
+      renderMacroEditor(selectedIndex);
+    }
   } else {
     keyControls.style.display = 'flex';
-    dualControls.style.display = 'none';
+    updateDisplays();
   }
   updateDisplays();
 }
@@ -222,30 +288,164 @@ function updateSocdHint() {
   }
 }
 
-function renderSocdList() {
-  socdList.innerHTML = '';
-  if (socdPairs.length === 0) {
-    socdList.innerHTML = '<span style="color:#94a3b8; font-size:0.9rem;">No SOCD pairs</span>';
+// ---------- Macro Editor ----------
+function renderMacroEditor(buttonIdx) {
+  if (!macroStepsDiv) return;
+  if (!macroData[buttonIdx]) macroData[buttonIdx] = { steps: [] };
+  const steps = macroData[buttonIdx].steps || [];
+  if (steps.length === 0) {
+    macroStepsDiv.innerHTML = '<div style="color:#94a3b8; font-size:0.9rem; text-align:center; padding:0.5rem;">No steps – click "Add Step"</div>';
     return;
   }
-  socdPairs.forEach((pair, idx) => {
-    const el = document.createElement('span');
-    el.className = 'socd-pair';
-    el.innerHTML = `
-      Button ${pair.idx1+1} ↔ ${pair.idx2+1}
-      <button class="remove-pair" data-index="${idx}">✕</button>
+  let html = '';
+  for (let i = 0; i < steps.length; i++) {
+    const step = steps[i];
+    const isSelected = (selectedStepIndex === i);
+    const keyDisplay = step.key || '—';
+    const delayDisplay = step.delay || 0;
+    const actions = ['P', 'R', 'B', 'D'];
+    const actionLabels = ['Press', 'Release', 'Both', 'Delay'];
+    let actionOptions = actions.map((a, idx) =>
+      `<option value="${a}" ${step.action === a ? 'selected' : ''}>${actionLabels[idx]}</option>`
+    ).join('');
+    html += `
+      <div class="macro-step ${isSelected ? 'selected' : ''}" data-step-index="${i}">
+        <span class="step-index">${i+1}.</span>
+        <select class="step-action" data-index="${i}">
+          ${actionOptions}
+        </select>
+        <span class="step-key ${isSelected ? 'active-step-key' : ''}" data-step="${i}">${keyDisplay}</span>
+        <input type="number" class="step-delay" data-index="${i}" value="${delayDisplay}" min="0" max="5000" placeholder="ms" style="${step.action !== 'D' ? 'display:none;' : ''}">
+        <button class="remove-step" data-index="${i}">✕</button>
+      </div>
     `;
-    el.querySelector('.remove-pair').addEventListener('click', (e) => {
+  }
+  macroStepsDiv.innerHTML = html;
+
+  // Event listeners
+  macroStepsDiv.querySelectorAll('.step-key').forEach(el => {
+    el.addEventListener('click', (e) => {
       e.stopPropagation();
-      const i = parseInt(e.target.dataset.index);
-      removeSocdPair(i);
+      const idx = parseInt(el.dataset.step);
+      if (!isNaN(idx)) {
+        selectedStepIndex = idx;
+        renderMacroEditor(selectedIndex);
+        log(`Selected step ${idx+1} for key assignment.`);
+      }
     });
-    socdList.appendChild(el);
   });
-  updateSocdHint();
+
+  macroStepsDiv.querySelectorAll('.remove-step').forEach(el => {
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const idx = parseInt(el.dataset.index);
+      if (!isNaN(idx)) {
+        removeStep(selectedIndex, idx);
+      }
+    });
+  });
+
+  macroStepsDiv.querySelectorAll('.step-action').forEach(el => {
+    el.addEventListener('change', (e) => {
+      const idx = parseInt(el.dataset.index);
+      const newAction = el.value;
+      if (!isNaN(idx) && selectedIndex !== null) {
+        macroData[selectedIndex].steps[idx].action = newAction;
+        const delayInput = macroStepsDiv.querySelector(`.step-delay[data-index="${idx}"]`);
+        if (delayInput) {
+          delayInput.style.display = (newAction === 'D') ? 'inline-block' : 'none';
+        }
+        updateKeyLabel(selectedIndex);
+      }
+    });
+  });
+
+  macroStepsDiv.querySelectorAll('.step-delay').forEach(el => {
+    el.addEventListener('change', (e) => {
+      const idx = parseInt(el.dataset.index);
+      const val = parseInt(el.value) || 0;
+      if (!isNaN(idx) && selectedIndex !== null) {
+        macroData[selectedIndex].steps[idx].delay = Math.min(val, 5000);
+        updateKeyLabel(selectedIndex);
+      }
+    });
+  });
+
+  updateUI();
+  updateControls();
 }
 
-// ---------- Local SOCD removal ----------
+function addStep() {
+  if (selectedIndex === null) return;
+  if (!macroData[selectedIndex]) macroData[selectedIndex] = { steps: [] };
+  macroData[selectedIndex].steps.push({ action: 'P', key: '', delay: 0 });
+  selectedStepIndex = macroData[selectedIndex].steps.length - 1;
+  renderMacroEditor(selectedIndex);
+  updateKeyLabel(selectedIndex);
+  log(`Added step ${selectedStepIndex+1}`);
+}
+
+function removeStep(buttonIdx, stepIdx) {
+  if (buttonIdx === null || buttonIdx === undefined) return;
+  if (!macroData[buttonIdx]) return;
+  macroData[buttonIdx].steps.splice(stepIdx, 1);
+  if (selectedStepIndex === stepIdx) selectedStepIndex = null;
+  else if (selectedStepIndex > stepIdx) selectedStepIndex--;
+  renderMacroEditor(buttonIdx);
+  updateKeyLabel(buttonIdx);
+  log(`Removed step ${stepIdx+1}`);
+}
+
+function clearMacro() {
+  if (selectedIndex === null) return;
+  if (!macroData[selectedIndex]) return;
+  macroData[selectedIndex].steps = [];
+  selectedStepIndex = null;
+  renderMacroEditor(selectedIndex);
+  updateKeyLabel(selectedIndex);
+  log('Cleared macro');
+}
+
+async function applyMacro() {
+  if (selectedIndex === null) return;
+  if (!writer || busy) { log('Not connected or busy'); return; }
+  const steps = macroData[selectedIndex]?.steps || [];
+  if (steps.length === 0) {
+    log('Macro is empty – nothing to save.');
+    return;
+  }
+  const parts = [];
+  for (const step of steps) {
+    if (step.action === 'D') {
+      parts.push(`D:${step.delay || 0}`);
+    } else {
+      const key = step.key || '';
+      if (!key) {
+        log('Step has no key assigned – skipping.', true);
+        continue;
+      }
+      parts.push(`${step.action}:${key}`);
+    }
+  }
+  if (parts.length === 0) {
+    log('No valid steps to save.', true);
+    return;
+  }
+  const macroStr = parts.join(',');
+  await sendCommand(`SETMACRO ${selectedIndex+1}:${macroStr}`);
+  const resp = await readUntil(line => line === 'OK', 2000);
+  if (resp === 'OK') {
+    log(`Macro saved for Button ${selectedIndex+1}`);
+    if (modes[selectedIndex] !== 2) {
+      await setMode(selectedIndex, 2);
+    }
+    updateKeyLabel(selectedIndex);
+  } else {
+    log('Failed to save macro.', true);
+  }
+}
+
+// ---------- SOCD removal ----------
 function removeSocdPairByButton(buttonIndex) {
   let pairIndex = -1;
   for (let i = 0; i < socdPairs.length; i++) {
@@ -260,7 +460,7 @@ function removeSocdPairByButton(buttonIndex) {
     renderGrid();
     updateUI();
     updateSocdHint();
-    log(`SOCD pair removed because button ${buttonIndex+1} switched to Dual mode.`);
+    log(`SOCD pair removed because button ${buttonIndex+1} switched to Dual/Macro mode.`);
   }
 }
 
@@ -329,6 +529,7 @@ async function fetchAllData() {
   busy = true;
   updateUI();
   try {
+    // Fetch press keys
     await sendCommand('GETPRESSALL');
     let receivedPress = [];
     let buffer = '';
@@ -355,6 +556,7 @@ async function fetchAllData() {
         }
       }
     }
+    // Fetch release keys
     await sendCommand('GETRELEASEALL');
     let receivedRelease = [];
     buffer = '';
@@ -381,6 +583,7 @@ async function fetchAllData() {
         }
       }
     }
+    // Fetch modes
     await sendCommand('GETMODEALL');
     let receivedModes = [];
     buffer = '';
@@ -410,6 +613,8 @@ async function fetchAllData() {
     pressKeys = receivedPress.map(v => v || '');
     releaseKeys = receivedRelease.map(v => v || '');
     modes = receivedModes.map(v => (v !== undefined) ? v : 0);
+    // Fetch macros
+    await fetchMacros();
     renderGrid();
     updateDisplays();
     updateModeSectionState();
@@ -419,6 +624,60 @@ async function fetchAllData() {
   } finally {
     busy = false;
     updateUI();
+  }
+}
+
+// ---------- Fetch macros ----------
+async function fetchMacros() {
+  if (!writer) return;
+  try {
+    await sendCommand('GETMACROALL');
+    let buffer = '';
+    let done = false;
+    const start = Date.now();
+    while (!done && (Date.now() - start < 3000)) {
+      const { value, done: doneRead } = await reader.read();
+      if (doneRead) { await disconnect(); return; }
+      const chunk = new TextDecoder().decode(value);
+      buffer += chunk;
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        log(`RX: ${trimmed}`);
+        if (trimmed === 'END') { done = true; break; }
+        if (trimmed.startsWith('MACRO')) {
+          const parts = trimmed.split(':');
+          if (parts.length === 2) {
+            const idx = parseInt(parts[0].replace('MACRO', '')) - 1;
+            const macroStr = parts[1];
+            const steps = [];
+            if (macroStr && macroStr.length > 0) {
+              const tokens = macroStr.split(',');
+              for (const token of tokens) {
+                const colon = token.indexOf(':');
+                if (colon > 0) {
+                  const action = token.substring(0, colon);
+                  const value = token.substring(colon+1);
+                  if (action === 'D') {
+                    steps.push({ action: 'D', key: '', delay: parseInt(value) || 0 });
+                  } else if (['P','R','B'].includes(action)) {
+                    steps.push({ action, key: value, delay: 0 });
+                  }
+                }
+              }
+            }
+            macroData[idx] = { steps };
+          }
+        }
+      }
+    }
+    for (let i = 0; i < 6; i++) {
+      if (!macroData[i]) macroData[i] = { steps: [] };
+    }
+  } catch (e) {
+    log(`Fetch macros error: ${e.message}`, true);
   }
 }
 
@@ -560,7 +819,7 @@ async function clearAllSocd() {
   }
 }
 
-// ---------- Set Press Key ----------
+// ---------- Set Press/Release/Mode ----------
 async function setPressKey(index, keyName) {
   if (index < 0 || index > 5) return false;
   if (!writer || busy) return false;
@@ -627,7 +886,7 @@ async function setMode(index, modeVal) {
   if (!writer || busy) return false;
   if (modeVal === modes[index]) return true;
   
-  if (modeVal === 1) {
+  if (modeVal === 1 || modeVal === 2) {
     removeSocdPairByButton(index);
   }
   
@@ -642,10 +901,13 @@ async function setMode(index, modeVal) {
       modes[index] = modeVal;
       updateKeyLabel(index);
       updateDisplays();
-      log(`Set mode for Button ${index+1} to ${modeVal === 0 ? 'Key' : 'Dual'}`);
+      log(`Set mode for Button ${index+1} to ${modeVal === 0 ? 'Key' : (modeVal === 1 ? 'Dual' : 'Macro')}`);
       await new Promise(r => setTimeout(r, 50));
       await fetchSocd();
       renderGrid();
+      if (modeVal === 2) {
+        renderMacroEditor(index);
+      }
       return true;
     } else {
       log(`Failed to set mode: ${resp}`, true);
@@ -670,6 +932,9 @@ async function refreshAll() {
       document.querySelector(`input[name="mode"][value="${mode}"]`).checked = true;
       toggleModeControls(mode);
       updateDisplays();
+      if (mode === 2) {
+        renderMacroEditor(selectedIndex);
+      }
     }
     updateModeSectionState();
   }
@@ -695,6 +960,9 @@ async function resetToDefaults() {
         document.querySelector(`input[name="mode"][value="${mode}"]`).checked = true;
         toggleModeControls(mode);
         updateDisplays();
+        if (mode === 2) {
+          renderMacroEditor(selectedIndex);
+        }
       }
       updateModeSectionState();
     } else {
@@ -720,6 +988,7 @@ async function connect() {
     await new Promise(r => setTimeout(r, 50));
     await refreshAll();
     selectedIndex = null;
+    selectedStepIndex = null;
     renderGrid();
     updateControls();
     updateUI();
@@ -764,7 +1033,9 @@ async function disconnect() {
   pressKeys = [];
   releaseKeys = [];
   modes = [];
+  macroData = [];
   selectedIndex = null;
+  selectedStepIndex = null;
   socdPairs = [];
   socdPicking = false;
   socdPickBuffer = [];
@@ -877,21 +1148,38 @@ async function onKeyClick(value) {
   }
   const mode = modes[selectedIndex] || 0;
   if (mode === 0) {
-    // Key mode: set press key and switch to Key mode (if not already)
     await setPressKey(selectedIndex, value);
     if (modes[selectedIndex] !== 0) {
       await setMode(selectedIndex, 0);
     }
     document.querySelector('input[name="mode"][value="0"]').checked = true;
     toggleModeControls(0);
-  } else {
-    // Dual mode: assign to the selected slot (press or release)
+  } else if (mode === 1) {
     if (dualTarget === 'press') {
       await setPressKey(selectedIndex, value);
     } else {
       await setReleaseKey(selectedIndex, value);
     }
     updateDisplays();
+  } else if (mode === 2) {
+    if (selectedStepIndex === null) {
+      log('Please select a step first (click on its key display)');
+      return;
+    }
+    const steps = macroData[selectedIndex]?.steps || [];
+    if (selectedStepIndex >= steps.length) {
+      log('Selected step does not exist', true);
+      return;
+    }
+    const step = steps[selectedStepIndex];
+    if (step.action === 'D') {
+      log('Delay steps do not use keys – set the delay value instead.', true);
+      return;
+    }
+    step.key = value;
+    renderMacroEditor(selectedIndex);
+    updateKeyLabel(selectedIndex);
+    log(`Assigned "${value}" to step ${selectedStepIndex+1}`);
   }
 }
 
@@ -905,7 +1193,6 @@ modeRadios.forEach(radio => {
   });
 });
 
-// Click on dual display to change target
 document.querySelectorAll('.dual-slot').forEach(el => {
   el.addEventListener('click', () => {
     if (selectedIndex === null) return;
@@ -944,6 +1231,10 @@ applyDualBtn.addEventListener('click', async () => {
   document.querySelector('input[name="mode"][value="1"]').checked = true;
   toggleModeControls(1);
 });
+
+addStepBtn.addEventListener('click', addStep);
+clearMacroBtn.addEventListener('click', clearMacro);
+applyMacroBtn.addEventListener('click', applyMacro);
 
 refreshBtn.addEventListener('click', async () => {
   if (writer && !busy) { await refreshAll(); }
