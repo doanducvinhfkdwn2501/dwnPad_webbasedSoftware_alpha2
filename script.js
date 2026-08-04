@@ -14,11 +14,6 @@ const macroStepsDiv = document.getElementById('macroSteps');
 const addStepBtn = document.getElementById('addStepBtn');
 const clearMacroBtn = document.getElementById('clearMacroBtn');
 const applyMacroBtn = document.getElementById('applyMacroBtn');
-const profileNameInput = document.getElementById('profileNameInput');
-const addProfileBtn = document.getElementById('addProfileBtn');
-const deleteProfileBtn = document.getElementById('deleteProfileBtn');
-const profileSelect = document.getElementById('profileSelect');
-const loadProfileBtn = document.getElementById('loadProfileBtn');
 const copyPressToReleaseBtn = document.getElementById('copyPressToReleaseBtn');
 const applyDualBtn = document.getElementById('applyDualBtn');
 const statusDot = document.getElementById('statusDot');
@@ -45,69 +40,8 @@ let socdPickBuffer = [];
 let heartbeatInterval = null;
 let busy = false;
 let dualTarget = 'press';
-let macroData = []; // array of { steps: [ { action, key, delay } ], profileName: string }
+let macroData = []; // array of { steps: [ { action, key, delay } ] }
 let selectedStepIndex = null;
-
-// ---------- Constants ----------
-const MAX_PROFILES = 3; // Maximum number of profiles allowed
-
-// ---------- Profile storage ----------
-const PROFILES_KEY = 'dwnPad_macro_profiles';
-const BUTTON_PROFILES_KEY = 'dwnPad_button_profiles';
-
-function getProfiles() {
-  try {
-    return JSON.parse(localStorage.getItem(PROFILES_KEY)) || {};
-  } catch { return {}; }
-}
-
-function saveProfiles(profiles) {
-  localStorage.setItem(PROFILES_KEY, JSON.stringify(profiles));
-}
-
-function getButtonProfiles() {
-  try {
-    return JSON.parse(localStorage.getItem(BUTTON_PROFILES_KEY)) || {};
-  } catch { return {}; }
-}
-
-function saveButtonProfiles(buttonProfiles) {
-  localStorage.setItem(BUTTON_PROFILES_KEY, JSON.stringify(buttonProfiles));
-}
-
-function setButtonProfile(buttonIndex, profileName) {
-  const buttonProfiles = getButtonProfiles();
-  if (profileName) {
-    buttonProfiles[buttonIndex] = profileName;
-  } else {
-    delete buttonProfiles[buttonIndex];
-  }
-  saveButtonProfiles(buttonProfiles);
-  if (macroData[buttonIndex]) {
-    macroData[buttonIndex].profileName = profileName || '';
-  }
-}
-
-function loadButtonProfiles() {
-  const buttonProfiles = getButtonProfiles();
-  for (let i = 0; i < 6; i++) {
-    if (!macroData[i]) macroData[i] = { steps: [], profileName: '' };
-    const name = buttonProfiles[i] || '';
-    macroData[i].profileName = name;
-  }
-}
-
-function populateProfileSelect() {
-  const profiles = getProfiles();
-  const names = Object.keys(profiles).sort();
-  profileSelect.innerHTML = '<option value="">-- Select profile --</option>';
-  names.forEach(name => {
-    const opt = document.createElement('option');
-    opt.value = name;
-    opt.textContent = name;
-    profileSelect.appendChild(opt);
-  });
-}
 
 // ---------- Logging ----------
 function log(msg, isError = false) {
@@ -269,12 +203,6 @@ function onSlotClick(index) {
     updateDisplays();
     if (mode === 2) {
       renderMacroEditor(selectedIndex);
-      const profName = macroData[selectedIndex]?.profileName || '';
-      if (profName && profileSelect.querySelector(`option[value="${profName}"]`)) {
-        profileSelect.value = profName;
-      } else {
-        profileSelect.value = '';
-      }
     }
   } else {
     log('Deselected all buttons');
@@ -289,7 +217,6 @@ function updateKeyLabel(index) {
 
 function updateUI() {
   const connected = !!writer && !busy;
-  const hasProfileName = profileNameInput.value.trim() !== '';
   const hasSteps = selectedIndex !== null && modes[selectedIndex] === 2 && (macroData[selectedIndex]?.steps?.length || 0) > 0;
 
   connectBtn.disabled = connected;
@@ -301,10 +228,6 @@ function updateUI() {
   applyMacroBtn.disabled = !connected || selectedIndex === null || busy || modes[selectedIndex] !== 2 || !hasSteps;
   addStepBtn.disabled = !connected || selectedIndex === null || busy || modes[selectedIndex] !== 2;
   clearMacroBtn.disabled = !connected || selectedIndex === null || busy || modes[selectedIndex] !== 2;
-  addProfileBtn.disabled = !connected || selectedIndex === null || busy || modes[selectedIndex] !== 2 || !hasProfileName;
-  loadProfileBtn.disabled = !connected || selectedIndex === null || busy || modes[selectedIndex] !== 2;
-  deleteProfileBtn.disabled = !connected || selectedIndex === null || busy || modes[selectedIndex] !== 2;
-  profileSelect.disabled = !connected || selectedIndex === null || busy || modes[selectedIndex] !== 2;
   socdAddBtn.disabled = !connected || busy;
   socdClearBtn.disabled = !connected || socdPairs.length === 0 || busy;
   statusDot.className = 'status-dot' + (connected ? ' connected' : '');
@@ -326,7 +249,7 @@ function updateControls() {
       const mode = modes[selectedIndex] || 0;
       if (mode === 0) modeText = 'Key mode – click a key to assign it.';
       else if (mode === 1) modeText = 'Dual mode – select a slot (Press/Release) then click a key.';
-      else if (mode === 2) modeText = 'Macro mode – build steps, then save to Arduino or as profile.';
+      else if (mode === 2) modeText = 'Macro mode – build steps, then save to Arduino.';
     }
     hint.textContent = dimmed
       ? 'Click a button above to select it.'
@@ -338,10 +261,6 @@ function updateControls() {
   copyPressToReleaseBtn.disabled = dimmed || !writer;
   addStepBtn.disabled = dimmed || !writer || (selectedIndex !== null && modes[selectedIndex] !== 2);
   clearMacroBtn.disabled = dimmed || !writer || (selectedIndex !== null && modes[selectedIndex] !== 2);
-  addProfileBtn.disabled = dimmed || !writer || (selectedIndex !== null && modes[selectedIndex] !== 2) || profileNameInput.value.trim() === '';
-  loadProfileBtn.disabled = dimmed || !writer || (selectedIndex !== null && modes[selectedIndex] !== 2);
-  deleteProfileBtn.disabled = dimmed || !writer || (selectedIndex !== null && modes[selectedIndex] !== 2);
-  profileSelect.disabled = dimmed || !writer || (selectedIndex !== null && modes[selectedIndex] !== 2);
   updateModeSectionState();
 }
 
@@ -355,15 +274,8 @@ function toggleModeControls(mode) {
     updateDisplays();
   } else if (mode === 2) {
     macroControls.style.display = 'block';
-    populateProfileSelect();
     if (selectedIndex !== null) {
       renderMacroEditor(selectedIndex);
-      const profName = macroData[selectedIndex]?.profileName || '';
-      if (profName && profileSelect.querySelector(`option[value="${profName}"]`)) {
-        profileSelect.value = profName;
-      } else {
-        profileSelect.value = '';
-      }
     }
   } else {
     keyControls.style.display = 'flex';
@@ -395,7 +307,7 @@ function updateSocdHint() {
 // ---------- Macro Editor ----------
 function renderMacroEditor(buttonIdx) {
   if (!macroStepsDiv) return;
-  if (!macroData[buttonIdx]) macroData[buttonIdx] = { steps: [], profileName: '' };
+  if (!macroData[buttonIdx]) macroData[buttonIdx] = { steps: [] };
   const steps = macroData[buttonIdx].steps || [];
   if (steps.length === 0) {
     macroStepsDiv.innerHTML = '<div style="color:#94a3b8; font-size:0.9rem; text-align:center; padding:0.5rem;">No steps – click "Add Step"</div>';
@@ -483,7 +395,7 @@ function renderMacroEditor(buttonIdx) {
 
 function addStep() {
   if (selectedIndex === null) return;
-  if (!macroData[selectedIndex]) macroData[selectedIndex] = { steps: [], profileName: '' };
+  if (!macroData[selectedIndex]) macroData[selectedIndex] = { steps: [] };
   macroData[selectedIndex].steps.push({ action: 'P', key: '', delay: 0 });
   selectedStepIndex = macroData[selectedIndex].steps.length - 1;
   renderMacroEditor(selectedIndex);
@@ -518,93 +430,7 @@ function clearMacro() {
   updateControls();
 }
 
-// ---------- Save profile ----------
-function saveProfile(name) {
-  if (selectedIndex === null || modes[selectedIndex] !== 2) {
-    log('Select a button in Macro mode first');
-    return false;
-  }
-  const steps = macroData[selectedIndex]?.steps || [];
-  if (steps.length === 0) {
-    log('Macro is empty – nothing to save');
-    return false;
-  }
-  const profiles = getProfiles();
-  // Check if we're creating a new profile (name doesn't exist)
-  if (!profiles[name]) {
-    const currentCount = Object.keys(profiles).length;
-    if (currentCount >= MAX_PROFILES) {
-      log(`Profile limit reached (max ${MAX_PROFILES}). Cannot create new profile.`, true);
-      return false;
-    }
-  }
-  profiles[name] = steps.map(s => ({ ...s }));
-  saveProfiles(profiles);
-  populateProfileSelect();
-  setButtonProfile(selectedIndex, name);
-  profileSelect.value = name;
-  log(`Profile "${name}" saved (${steps.length} steps)`);
-  return true;
-}
-
-// ---------- Load profile ----------
-function loadProfile() {
-  if (selectedIndex === null || modes[selectedIndex] !== 2) {
-    log('Select a button in Macro mode first');
-    return;
-  }
-  const name = profileSelect.value;
-  if (!name) {
-    log('Select a profile');
-    return;
-  }
-  const profiles = getProfiles();
-  const steps = profiles[name];
-  if (!steps) {
-    log('Profile not found');
-    return;
-  }
-  macroData[selectedIndex].steps = steps.map(s => ({ ...s }));
-  setButtonProfile(selectedIndex, name);
-  selectedStepIndex = null;
-  renderMacroEditor(selectedIndex);
-  updateKeyLabel(selectedIndex);
-  profileSelect.value = name;
-  log(`Profile "${name}" loaded (${steps.length} steps)`);
-  if (writer && !busy) {
-    applyMacro();
-  } else {
-    log('Not connected – macro loaded in UI only', true);
-  }
-}
-
-function deleteProfile() {
-  const name = profileSelect.value;
-  if (!name) {
-    log('Select a profile to delete');
-    return;
-  }
-  if (!confirm(`Delete profile "${name}"?`)) return;
-  const profiles = getProfiles();
-  delete profiles[name];
-  saveProfiles(profiles);
-  populateProfileSelect();
-  const buttonProfiles = getButtonProfiles();
-  for (const [key, val] of Object.entries(buttonProfiles)) {
-    if (val === name) {
-      delete buttonProfiles[key];
-      const idx = parseInt(key);
-      if (macroData[idx]) macroData[idx].profileName = '';
-    }
-  }
-  saveButtonProfiles(buttonProfiles);
-  if (profileNameInput.value === name) {
-    profileNameInput.value = '';
-  }
-  log(`Profile "${name}" deleted`);
-}
-
-// ---------- Apply Macro to Arduino (and auto-save profile if name entered) ----------
+// ---------- Apply Macro to Arduino ----------
 async function applyMacro() {
   if (selectedIndex === null) return;
   if (!writer || busy) { log('Not connected or busy'); return; }
@@ -639,15 +465,6 @@ async function applyMacro() {
       await setMode(selectedIndex, 2);
     }
     updateKeyLabel(selectedIndex);
-    const profileName = profileNameInput.value.trim();
-    if (profileName) {
-      saveProfile(profileName);
-    } else {
-      const currentName = macroData[selectedIndex]?.profileName || '';
-      if (currentName && profileSelect.querySelector(`option[value="${currentName}"]`)) {
-        profileSelect.value = currentName;
-      }
-    }
   } else {
     log('Failed to save macro.', true);
   }
@@ -823,20 +640,9 @@ async function fetchAllData() {
     modes = receivedModes.map(v => (v !== undefined) ? v : 0);
     // Fetch macros
     await fetchMacros();
-    // Load button profiles from localStorage (this will set macroData[i].profileName)
-    loadButtonProfiles();
     renderGrid();
     updateDisplays();
     updateModeSectionState();
-    // If a button is selected and in macro mode, restore dropdown
-    if (selectedIndex !== null && modes[selectedIndex] === 2) {
-      const profName = macroData[selectedIndex]?.profileName || '';
-      if (profName && profileSelect.querySelector(`option[value="${profName}"]`)) {
-        profileSelect.value = profName;
-      } else {
-        profileSelect.value = '';
-      }
-    }
     log('Fetched all data');
   } catch (e) {
     log(`Fetch data error: ${e.message}`, true);
@@ -889,14 +695,14 @@ async function fetchMacros() {
                 }
               }
             }
-            macroData[idx] = { steps, profileName: '' };
+            macroData[idx] = { steps };
             log(`Loaded macro for button ${idx+1}: ${steps.length} steps`);
           }
         }
       }
     }
     for (let i = 0; i < 6; i++) {
-      if (!macroData[i]) macroData[i] = { steps: [], profileName: '' };
+      if (!macroData[i]) macroData[i] = { steps: [] };
     }
   } catch (e) {
     log(`Fetch macros error: ${e.message}`, true);
@@ -1129,13 +935,6 @@ async function setMode(index, modeVal) {
       renderGrid();
       if (modeVal === 2) {
         renderMacroEditor(index);
-        populateProfileSelect();
-        const profName = macroData[index]?.profileName || '';
-        if (profName && profileSelect.querySelector(`option[value="${profName}"]`)) {
-          profileSelect.value = profName;
-        } else {
-          profileSelect.value = '';
-        }
       }
       return true;
     } else {
@@ -1163,13 +962,6 @@ async function refreshAll() {
       updateDisplays();
       if (mode === 2) {
         renderMacroEditor(selectedIndex);
-        populateProfileSelect();
-        const profName = macroData[selectedIndex]?.profileName || '';
-        if (profName && profileSelect.querySelector(`option[value="${profName}"]`)) {
-          profileSelect.value = profName;
-        } else {
-          profileSelect.value = '';
-        }
       }
     }
     updateModeSectionState();
@@ -1191,10 +983,6 @@ async function resetToDefaults() {
       busy = false;
       await fetchAllData();
       await fetchSocd();
-      // Also clear button profiles for all buttons
-      for (let i = 0; i < 6; i++) {
-        setButtonProfile(i, '');
-      }
       if (selectedIndex !== null) {
         const mode = modes[selectedIndex] || 0;
         document.querySelector(`input[name="mode"][value="${mode}"]`).checked = true;
@@ -1202,8 +990,6 @@ async function resetToDefaults() {
         updateDisplays();
         if (mode === 2) {
           renderMacroEditor(selectedIndex);
-          populateProfileSelect();
-          profileSelect.value = '';
         }
       }
       updateModeSectionState();
@@ -1235,7 +1021,6 @@ async function connect() {
     updateControls();
     updateUI();
     updateModeSectionState();
-    populateProfileSelect();
 
     if (heartbeatInterval) clearInterval(heartbeatInterval);
     heartbeatInterval = setInterval(async () => {
@@ -1480,59 +1265,6 @@ addStepBtn.addEventListener('click', addStep);
 clearMacroBtn.addEventListener('click', clearMacro);
 applyMacroBtn.addEventListener('click', applyMacro);
 
-// Profile actions
-addProfileBtn.addEventListener('click', () => {
-  if (selectedIndex === null) {
-    log('Select a button first');
-    return;
-  }
-  if (modes[selectedIndex] !== 2) {
-    log('Switch to Macro mode first');
-    return;
-  }
-  const name = profileNameInput.value.trim();
-  if (!name) {
-    log('Enter a profile name');
-    return;
-  }
-  const profiles = getProfiles();
-  // Check limit before creating new profile
-  if (Object.keys(profiles).length >= MAX_PROFILES) {
-    log(`Profile limit reached (max ${MAX_PROFILES}). Cannot create new profile.`, true);
-    return;
-  }
-  if (profiles[name]) {
-    log(`Profile "${name}" already exists. Use a different name or delete the existing one.`, true);
-    return;
-  }
-  // Create empty profile
-  profiles[name] = [];
-  saveProfiles(profiles);
-  populateProfileSelect();
-  // Clear current macro steps and show "No steps"
-  clearMacro();
-  // Store profile name for this button (in localStorage)
-  setButtonProfile(selectedIndex, name);
-  // Select the new profile in the dropdown
-  profileSelect.value = name;
-  // Clear the profile name input field
-  profileNameInput.value = '';
-  log(`New empty profile "${name}" created. Build your macro steps.`);
-});
-
-loadProfileBtn.addEventListener('click', loadProfile);
-deleteProfileBtn.addEventListener('click', deleteProfile);
-profileNameInput.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') {
-    const name = profileNameInput.value.trim();
-    if (name) saveProfile(name);
-  }
-});
-profileNameInput.addEventListener('input', () => {
-  updateUI();
-  updateControls();
-});
-
 refreshBtn.addEventListener('click', async () => {
   if (writer && !busy) { await refreshAll(); }
 });
@@ -1581,7 +1313,6 @@ updateUI();
 renderSocdList();
 updateSocdHint();
 updateModeSectionState();
-populateProfileSelect();
 if (!('serial' in navigator)) {
   log('❌ Web Serial API not supported. Use Chrome/Edge.', true);
   connectBtn.disabled = true;
