@@ -1011,6 +1011,10 @@ async function connect() {
     await port.open({ baudRate: 9600 });
     writer = port.writable.getWriter();
     reader = port.readable.getReader();
+    port.addEventListener('disconnect', () => {
+      log('⚠️ Device unplugged!');
+      disconnect(); // Calls your existing cleanup function
+    });
     updateUI();
     log('Connected to Arduino');
     await new Promise(r => setTimeout(r, 50));
