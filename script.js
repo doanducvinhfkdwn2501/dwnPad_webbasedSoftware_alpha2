@@ -532,21 +532,6 @@ async function readUntil(predicate, timeoutMs = 3000) {
   }
 }
 
-// ---------- Heartbeat ----------
-async function checkConnection() {
-  if (busy) return true;
-  if (!writer) { await disconnect(); return false; }
-  try {
-    await sendCommand('PING');
-    const resp = await readUntil(line => line === 'PONG', 1000);
-    if (resp === 'PONG') return true;
-    await disconnect();
-    return false;
-  } catch (e) {
-    await disconnect();
-    return false;
-  }
-}
 
 // ---------- Fetch all data ----------
 async function fetchAllData() {
