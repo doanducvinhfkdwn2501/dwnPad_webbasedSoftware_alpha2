@@ -43,6 +43,130 @@ let dualTarget = 'press';
 let macroData = []; // array of { steps: [ { action, key, delay } ] }
 let selectedStepIndex = null;
 
+// ---------- Serial: Unified Reader & Promise Helpers ----------
+let serialBuffer = '';
+let pendingRequests = []; // array of { resolve, reject, predicate, timeoutId, collect }
+
+// Start the background reader (call once after connection)
+async function startSerialReader() {
+  if (!reader) return;
+  try {
+    while (reader) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      const chunk = new TextDecoder().decode(value);
+      serialBuffer += chunk;
+      const lines = serialBuffer.split('\n');
+      serialBuffer = lines.pop() || '';
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        log(`RX: ${trimmed}`);
+
+        // 1. Handle STATE messages immediately
+        if (trimmed.startsWith('STATE:')) {
+          const parts = trimmed.split(':');
+          if (parts.length === 3) {
+            const idx = parseInt(parts[1]) - 1;
+            const state = parseInt(parts[2]);
+            updateButtonVisual(idx, state);
+          }
+          continue; // STATE is not a command response
+        }
+
+        // 2. Check pending requests (in order)
+        for (let i = 0; i < pendingRequests.length; i++) {
+          const req = pendingRequests[i];
+          try {
+            if (req.collect) {
+              // Collecting until predicate matches
+              if (!req.collected) req.collected = [];
+              req.collected.push(trimmed);
+              if (req.predicate(trimmed)) {
+                // Resolve with all collected lines
+                const resolve = req.resolve;
+                const timeoutId = req.timeoutId;
+                pendingRequests.splice(i, 1);
+                if (timeoutId) clearTimeout(timeoutId);
+                resolve(req.collected);
+                break;
+              }
+            } else {
+              // Single-line match
+              if (req.predicate(trimmed)) {
+                const resolve = req.resolve;
+                const timeoutId = req.timeoutId;
+                pendingRequests.splice(i, 1);
+                if (timeoutId) clearTimeout(timeoutId);
+                resolve(trimmed);
+                break;
+              }
+            }
+          } catch (e) {
+            // If predicate throws, reject this request
+            const reject = req.reject;
+            const timeoutId = req.timeoutId;
+            pendingRequests.splice(i, 1);
+            if (timeoutId) clearTimeout(timeoutId);
+            reject(e);
+            break;
+          }
+        }
+      }
+    }
+  } catch (e) {
+    if (reader) log(`Reader error: ${e.message}`, true);
+  }
+}
+
+// Send a command (no wait)
+async function sendCommand(cmd) {
+  if (!writer) throw new Error('No writer');
+  await writer.write(new TextEncoder().encode(cmd + '\n'));
+  log(`TX: ${cmd}`);
+}
+
+// Wait for a single line matching a predicate
+function waitForLine(predicate, timeoutMs = 3000) {
+  return new Promise((resolve, reject) => {
+    const timeoutId = setTimeout(() => {
+      const idx = pendingRequests.findIndex(r => r.timeoutId === timeoutId);
+      if (idx !== -1) {
+        pendingRequests.splice(idx, 1);
+        reject(new Error('Timeout waiting for line'));
+      }
+    }, timeoutMs);
+    pendingRequests.push({ resolve, reject, predicate, timeoutId, collect: false });
+  });
+}
+
+// Send a command and wait for a single response
+async function sendCommandAndWait(cmd, predicate, timeoutMs = 3000) {
+  await sendCommand(cmd);
+  return await waitForLine(predicate, timeoutMs);
+}
+
+// Collect all lines until the predicate matches (returns array of lines)
+function collectLinesUntil(predicate, timeoutMs = 3000) {
+  return new Promise((resolve, reject) => {
+    const timeoutId = setTimeout(() => {
+      const idx = pendingRequests.findIndex(r => r.timeoutId === timeoutId);
+      if (idx !== -1) {
+        pendingRequests.splice(idx, 1);
+        reject(new Error('Timeout collecting lines'));
+      }
+    }, timeoutMs);
+    pendingRequests.push({ resolve, reject, predicate, timeoutId, collect: true, collected: [] });
+  });
+}
+
+// Send a command and collect all lines until END
+async function sendCommandAndCollect(cmd, timeoutMs = 3000) {
+  await sendCommand(cmd);
+  const lines = await collectLinesUntil(line => line === 'END', timeoutMs);
+  return lines; // includes the 'END' line
+}
+
 // ---------- Logging ----------
 function log(msg, isError = false) {
   const entry = document.createElement('div');
@@ -393,6 +517,22 @@ function renderMacroEditor(buttonIdx) {
   updateControls();
 }
 
+// ---------- Real-time visual helper ----------
+function updateButtonVisual(idx, state) {
+  const slots = document.querySelectorAll('.btn-slot');
+  if (slots[idx]) {
+    if (state === 1) {
+      slots[idx].style.boxShadow = '0 0 20px #00ff88';
+      slots[idx].style.borderColor = '#00ff88';
+      slots[idx].style.transition = 'all 0.1s ease';
+    } else {
+      slots[idx].style.boxShadow = 'none';
+      slots[idx].style.borderColor = '';
+    }
+  }
+}
+
+// ---------- Macro actions ----------
 function addStep() {
   if (selectedIndex === null) return;
   if (!macroData[selectedIndex]) macroData[selectedIndex] = { steps: [] };
@@ -458,7 +598,7 @@ async function applyMacro() {
   }
   const macroStr = parts.join(',');
   await sendCommand(`SETMACRO ${selectedIndex+1}:${macroStr}`);
-  const resp = await readUntil(line => line === 'OK', 2000);
+  const resp = await waitForLine(line => line === 'OK', 2000);
   if (resp === 'OK') {
     log(`Macro saved for Button ${selectedIndex+1}`);
     if (modes[selectedIndex] !== 2) {
@@ -489,140 +629,52 @@ function removeSocdPairByButton(buttonIndex) {
   }
 }
 
-// ---------- Serial ----------
-async function sendCommand(cmd) {
-  if (!writer) throw new Error('No writer');
-  try {
-    await writer.write(new TextEncoder().encode(cmd + '\n'));
-    log(`TX: ${cmd}`);
-  } catch (e) {
-    log(`Write error: ${e.message}`, true);
-    await disconnect();
-    throw e;
-  }
-}
-
-async function readUntil(predicate, timeoutMs = 3000) {
-  if (!reader) throw new Error('No reader');
-  let buffer = '';
-  const start = Date.now();
-  try {
-    while (Date.now() - start < timeoutMs) {
-      const { value, done } = await reader.read();
-      if (done) {
-        await disconnect();
-        return null;
-      }
-      const chunk = new TextDecoder().decode(value);
-      buffer += chunk;
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || '';
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (trimmed) log(`RX: ${trimmed}`);
-        if (predicate(trimmed)) return trimmed;
-      }
-    }
-    if (writer) await disconnect();
-    return null;
-  } catch (e) {
-    log(`Read error: ${e.message}`, true);
-    await disconnect();
-    return null;
-  }
-}
-
-
-// ---------- Fetch all data ----------
+// ---------- Fetch all data (using new collector) ----------
 async function fetchAllData() {
   if (!writer || busy) return;
   busy = true;
   updateUI();
   try {
     // Fetch press keys
-    await sendCommand('GETPRESSALL');
+    const pressLines = await sendCommandAndCollect('GETPRESSALL');
     let receivedPress = [];
-    let buffer = '';
-    let done = false;
-    const start = Date.now();
-    while (!done && (Date.now() - start < 3000)) {
-      const { value, done: doneRead } = await reader.read();
-      if (doneRead) { await disconnect(); return; }
-      const chunk = new TextDecoder().decode(value);
-      buffer += chunk;
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || '';
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed) continue;
-        log(`RX: ${trimmed}`);
-        if (trimmed === 'END') { done = true; break; }
-        if (trimmed.startsWith('PRESS')) {
-          const parts = trimmed.split(':');
-          if (parts.length === 2) {
-            const idx = parseInt(parts[0].replace('PRESS', '')) - 1;
-            receivedPress[idx] = parts[1];
-          }
+    for (const line of pressLines) {
+      if (line.startsWith('PRESS')) {
+        const parts = line.split(':');
+        if (parts.length === 2) {
+          const idx = parseInt(parts[0].replace('PRESS', '')) - 1;
+          receivedPress[idx] = parts[1];
         }
       }
     }
     // Fetch release keys
-    await sendCommand('GETRELEASEALL');
+    const releaseLines = await sendCommandAndCollect('GETRELEASEALL');
     let receivedRelease = [];
-    buffer = '';
-    done = false;
-    const start2 = Date.now();
-    while (!done && (Date.now() - start2 < 3000)) {
-      const { value, done: doneRead } = await reader.read();
-      if (doneRead) { await disconnect(); return; }
-      const chunk = new TextDecoder().decode(value);
-      buffer += chunk;
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || '';
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed) continue;
-        log(`RX: ${trimmed}`);
-        if (trimmed === 'END') { done = true; break; }
-        if (trimmed.startsWith('RELEASE')) {
-          const parts = trimmed.split(':');
-          if (parts.length === 2) {
-            const idx = parseInt(parts[0].replace('RELEASE', '')) - 1;
-            receivedRelease[idx] = parts[1];
-          }
+    for (const line of releaseLines) {
+      if (line.startsWith('RELEASE')) {
+        const parts = line.split(':');
+        if (parts.length === 2) {
+          const idx = parseInt(parts[0].replace('RELEASE', '')) - 1;
+          receivedRelease[idx] = parts[1];
         }
       }
     }
     // Fetch modes
-    await sendCommand('GETMODEALL');
+    const modeLines = await sendCommandAndCollect('GETMODEALL');
     let receivedModes = [];
-    buffer = '';
-    done = false;
-    const start3 = Date.now();
-    while (!done && (Date.now() - start3 < 3000)) {
-      const { value, done: doneRead } = await reader.read();
-      if (doneRead) { await disconnect(); return; }
-      const chunk = new TextDecoder().decode(value);
-      buffer += chunk;
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || '';
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed) continue;
-        log(`RX: ${trimmed}`);
-        if (trimmed === 'END') { done = true; break; }
-        if (trimmed.startsWith('MODE')) {
-          const parts = trimmed.split(':');
-          if (parts.length === 2) {
-            const idx = parseInt(parts[0].replace('MODE', '')) - 1;
-            receivedModes[idx] = parseInt(parts[1]);
-          }
+    for (const line of modeLines) {
+      if (line.startsWith('MODE')) {
+        const parts = line.split(':');
+        if (parts.length === 2) {
+          const idx = parseInt(parts[0].replace('MODE', '')) - 1;
+          receivedModes[idx] = parseInt(parts[1]);
         }
       }
     }
     pressKeys = receivedPress.map(v => v || '');
     releaseKeys = receivedRelease.map(v => v || '');
     modes = receivedModes.map(v => (v !== undefined) ? v : 0);
+
     // Fetch macros
     await fetchMacros();
     renderGrid();
@@ -641,48 +693,33 @@ async function fetchAllData() {
 async function fetchMacros() {
   if (!writer) return;
   try {
-    await sendCommand('GETMACROALL');
-    let buffer = '';
-    let done = false;
-    const start = Date.now();
-    while (!done && (Date.now() - start < 3000)) {
-      const { value, done: doneRead } = await reader.read();
-      if (doneRead) { await disconnect(); return; }
-      const chunk = new TextDecoder().decode(value);
-      buffer += chunk;
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || '';
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed) continue;
-        log(`RX: ${trimmed}`);
-        if (trimmed === 'END') { done = true; break; }
-        if (trimmed.startsWith('MACRO')) {
-          const parts = trimmed.split(':');
-          if (parts.length === 2) {
-            const idx = parseInt(parts[0].replace('MACRO', '')) - 1;
-            const macroStr = parts[1];
-            const steps = [];
-            if (macroStr && macroStr.length > 0) {
-              const tokens = macroStr.split(',');
-              for (let token of tokens) {
-                token = token.trim();
-                if (!token) continue;
-                const colon = token.indexOf(':');
-                if (colon > 0) {
-                  const action = token.substring(0, colon).trim();
-                  const value = token.substring(colon+1).trim();
-                  if (action === 'D') {
-                    steps.push({ action: 'D', key: '', delay: parseInt(value) || 0 });
-                  } else if (['P','R','B'].includes(action)) {
-                    steps.push({ action, key: value, delay: 0 });
-                  }
+    const lines = await sendCommandAndCollect('GETMACROALL');
+    for (const line of lines) {
+      if (line.startsWith('MACRO')) {
+        const parts = line.split(':');
+        if (parts.length === 2) {
+          const idx = parseInt(parts[0].replace('MACRO', '')) - 1;
+          const macroStr = parts[1];
+          const steps = [];
+          if (macroStr && macroStr.length > 0) {
+            const tokens = macroStr.split(',');
+            for (let token of tokens) {
+              token = token.trim();
+              if (!token) continue;
+              const colon = token.indexOf(':');
+              if (colon > 0) {
+                const action = token.substring(0, colon).trim();
+                const value = token.substring(colon+1).trim();
+                if (action === 'D') {
+                  steps.push({ action: 'D', key: '', delay: parseInt(value) || 0 });
+                } else if (['P','R','B'].includes(action)) {
+                  steps.push({ action, key: value, delay: 0 });
                 }
               }
             }
-            macroData[idx] = { steps };
-            log(`Loaded macro for button ${idx+1}: ${steps.length} steps`);
           }
+          macroData[idx] = { steps };
+          log(`Loaded macro for button ${idx+1}: ${steps.length} steps`);
         }
       }
     }
@@ -701,9 +738,7 @@ async function fetchSocd() {
   updateUI();
   try {
     await sendCommand('GETSOCD');
-    await new Promise(r => setTimeout(r, 50));
-    const resp = await readUntil(line => line.startsWith('SOCD:'), 1500);
-    if (resp === null) return;
+    const resp = await waitForLine(line => line.startsWith('SOCD:'), 1500);
     if (resp) {
       socdPairs = [];
       if (resp !== 'SOCD:OFF') {
@@ -749,8 +784,7 @@ async function addSocdPair(idx1, idx2) {
   try {
     await sendCommand(`SOCD ADD ${idx1+1} ${idx2+1}`);
     await new Promise(r => setTimeout(r, 50));
-    const resp = await readUntil(line => line.startsWith('OK') || line.startsWith('ERROR'), 2000);
-    if (resp === null) return;
+    const resp = await waitForLine(line => line.startsWith('OK') || line.startsWith('ERROR'), 2000);
     if (resp && resp.startsWith('OK')) {
       socdPairs.push({ idx1, idx2 });
       renderSocdList();
@@ -779,8 +813,7 @@ async function removeSocdPair(index) {
   try {
     await sendCommand(`SOCD REMOVE ${index+1}`);
     await new Promise(r => setTimeout(r, 50));
-    const resp = await readUntil(line => line.startsWith('OK') || line.startsWith('ERROR'), 2000);
-    if (resp === null) return;
+    const resp = await waitForLine(line => line.startsWith('OK') || line.startsWith('ERROR'), 2000);
     if (resp && resp.startsWith('OK')) {
       socdPairs.splice(index, 1);
       renderSocdList();
@@ -809,8 +842,7 @@ async function clearAllSocd() {
   try {
     await sendCommand('SOCD CLEAR');
     await new Promise(r => setTimeout(r, 50));
-    const resp = await readUntil(line => line.startsWith('OK') || line.startsWith('ERROR'), 2000);
-    if (resp === null) return;
+    const resp = await waitForLine(line => line.startsWith('OK') || line.startsWith('ERROR'), 2000);
     if (resp && resp.startsWith('OK')) {
       socdPairs = [];
       renderSocdList();
@@ -840,9 +872,7 @@ async function setPressKey(index, keyName) {
   updateUI();
   try {
     await sendCommand(`SETPRESS ${index+1}:${keyName}`);
-    await new Promise(r => setTimeout(r, 50));
-    const resp = await readUntil(line => line === 'OK', 1500);
-    if (resp === null) return false;
+    const resp = await waitForLine(line => line === 'OK', 1500);
     if (resp === 'OK') {
       pressKeys[index] = keyName;
       updateKeyLabel(index);
@@ -872,9 +902,7 @@ async function setReleaseKey(index, keyName) {
   updateUI();
   try {
     await sendCommand(`SETRELEASE ${index+1}:${keyName}`);
-    await new Promise(r => setTimeout(r, 50));
-    const resp = await readUntil(line => line === 'OK', 1500);
-    if (resp === null) return false;
+    const resp = await waitForLine(line => line === 'OK', 1500);
     if (resp === 'OK') {
       releaseKeys[index] = keyName;
       updateKeyLabel(index);
@@ -907,9 +935,7 @@ async function setMode(index, modeVal) {
   updateUI();
   try {
     await sendCommand(`SETMODE ${index+1}:${modeVal}`);
-    await new Promise(r => setTimeout(r, 50));
-    const resp = await readUntil(line => line === 'OK', 1500);
-    if (resp === null) return false;
+    const resp = await waitForLine(line => line === 'OK', 1500);
     if (resp === 'OK') {
       modes[index] = modeVal;
       updateKeyLabel(index);
@@ -932,6 +958,22 @@ async function setMode(index, modeVal) {
   } finally {
     busy = false;
     updateUI();
+  }
+}
+
+// ---------- Heartbeat ----------
+async function checkConnection() {
+  if (busy) return true;
+  if (!writer) { await disconnect(); return false; }
+  try {
+    await sendCommand('PING');
+    const resp = await waitForLine(line => line === 'PONG', 1000);
+    if (resp === 'PONG') return true;
+    await disconnect();
+    return false;
+  } catch (e) {
+    await disconnect();
+    return false;
   }
 }
 
@@ -961,8 +1003,7 @@ async function resetToDefaults() {
   updateUI();
   try {
     await sendCommand('RESET');
-    const resp = await readUntil(line => line === 'OK RESET', 2000);
-    if (resp === null) return;
+    const resp = await waitForLine(line => line === 'OK RESET', 2000);
     if (resp) {
       log('Reset to defaults');
       busy = false;
@@ -998,11 +1039,15 @@ async function connect() {
     reader = port.readable.getReader();
     port.addEventListener('disconnect', () => {
       log('⚠️ Device unplugged!');
-      disconnect(); // Calls your existing cleanup function
+      disconnect();
     });
     updateUI();
     log('Connected to Arduino');
     await new Promise(r => setTimeout(r, 50));
+
+    // Start the unified background reader
+    startSerialReader();
+
     await refreshAll();
     selectedIndex = null;
     selectedStepIndex = null;
@@ -1035,6 +1080,12 @@ async function disconnect() {
     clearInterval(heartbeatInterval);
     heartbeatInterval = null;
   }
+  // Cancel all pending requests
+  for (const req of pendingRequests) {
+    if (req.timeoutId) clearTimeout(req.timeoutId);
+    req.reject(new Error('Disconnected'));
+  }
+  pendingRequests = [];
   const oldReader = reader;
   const oldWriter = writer;
   const oldPort = port;
