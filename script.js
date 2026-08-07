@@ -536,6 +536,14 @@ function updateButtonVisual(idx, state) {
 function addStep() {
   if (selectedIndex === null) return;
   if (!macroData[selectedIndex]) macroData[selectedIndex] = { steps: [] };
+  
+  // ----- NEW: Cap at 7 steps -----
+  if (macroData[selectedIndex].steps.length >= 7) {
+    log('⚠️ Maximum 7 steps per macro (Arduino limit).', true);
+    return;
+  }
+  // --------------------------------
+  
   macroData[selectedIndex].steps.push({ action: 'P', key: '', delay: 0 });
   selectedStepIndex = macroData[selectedIndex].steps.length - 1;
   renderMacroEditor(selectedIndex);
