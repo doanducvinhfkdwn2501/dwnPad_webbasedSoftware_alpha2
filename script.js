@@ -969,21 +969,6 @@ async function setMode(index, modeVal) {
   }
 }
 
-// ---------- Heartbeat ----------
-async function checkConnection() {
-  if (busy) return true;
-  if (!writer) { await disconnect(); return false; }
-  try {
-    await sendCommand('PING');
-    const resp = await waitForLine(line => line === 'PONG', 1000);
-    if (resp === 'PONG') return true;
-    await disconnect();
-    return false;
-  } catch (e) {
-    await disconnect();
-    return false;
-  }
-}
 
 // ---------- Refresh ----------
 async function refreshAll() {
