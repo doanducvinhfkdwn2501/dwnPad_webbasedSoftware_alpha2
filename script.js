@@ -252,12 +252,23 @@ function renderGrid() {
   for (let i = 0; i < 6; i++) {
     const slot = document.createElement('div');
     let cls = 'btn-slot';
+    
     if (selectedIndex === i) cls += ' selected';
-    if (socdPicking && socdPickBuffer.includes(i)) cls += ' socd-picked';
-    else if (socdPicking) cls += ' socd-pick';
+    
+    if (socdPicking) {
+      if (socdPickBuffer.includes(i)) {
+        cls += ' socd-picked';
+      } else if (modes[i] !== 0) {
+        cls += ' socd-invalid';
+      } else {
+        cls += ' socd-pick';
+      }
+    }
+    
     if (isInSocdPair(i)) cls += ' socd-active';
     if (modes[i] === 1) cls += ' dual-mode';
     if (modes[i] === 2) cls += ' macro-mode';
+    
     slot.className = cls;
     slot.dataset.index = i;
     const pinMap = [7, 4, 6, 2, 5, 3];
