@@ -598,3 +598,12 @@ h1 {
 .button-grid {
   grid-template-columns: repeat(3, 140px);  /* 3 columns, 140px each */
 }
+.btn-slot.socd-invalid {
+  opacity: 0.4;
+  cursor: not-allowed;
+  pointer-events: none;
+  filter: grayscale(0.8);
+}
+.button-grid.hidden {
+  display: none;
+}

@@ -354,6 +354,7 @@ function updateKeyLabel(index) {
 function updateUI() {
   const connected = !!writer && !busy;
   const hasSteps = selectedIndex !== null && modes[selectedIndex] === 2 && (macroData[selectedIndex]?.steps?.length || 0) > 0;
+  buttonGrid.classList.toggle('hidden', !connected);
 
   connectBtn.disabled = connected;
   disconnectBtn.disabled = !connected;
