@@ -304,7 +304,9 @@ function updateDisplays() {
 function updateModeSectionState() {
   const modeSection = document.querySelector('.mode-section');
   if (modeSection) {
-    modeSection.classList.toggle('disabled', selectedIndex === null);
+    // Disable when no button selected OR when not connected
+    const disabled = selectedIndex === null || !writer;
+    modeSection.classList.toggle('disabled', disabled);
   }
 }
 
@@ -364,32 +366,33 @@ function updateKeyLabel(index) {
 
 function updateUI() {
   const connected = !!writer && !busy;
-  const hasSteps = selectedIndex !== null && modes[selectedIndex] === 2 && (macroData[selectedIndex]?.steps?.length || 0) > 0;
-  buttonGrid.classList.toggle('hidden', !connected);
 
   connectBtn.disabled = connected;
   disconnectBtn.disabled = !connected;
   refreshBtn.disabled = !connected || busy;
   resetBtn.disabled = !connected || busy;
-  applyDualBtn.disabled = !connected || selectedIndex === null || busy;
-  copyPressToReleaseBtn.disabled = !connected || selectedIndex === null || busy;
-  applyMacroBtn.disabled = !connected || selectedIndex === null || busy || modes[selectedIndex] !== 2 || !hasSteps;
-  addStepBtn.disabled = !connected || selectedIndex === null || busy || modes[selectedIndex] !== 2;
-  clearMacroBtn.disabled = !connected || selectedIndex === null || busy || modes[selectedIndex] !== 2;
   socdAddBtn.disabled = !connected || busy;
   socdClearBtn.disabled = !connected || socdPairs.length === 0 || busy;
+
   statusDot.className = 'status-dot' + (connected ? ' connected' : '');
   statusText.textContent = connected ? 'Connected' : 'Disconnected';
+
   if (!connected && heartbeatInterval) {
     clearInterval(heartbeatInterval);
     heartbeatInterval = null;
   }
-  updateModeSectionState();
+
+  // Show/hide the button grid
+  buttonGrid.classList.toggle('hidden', !connected);
+
+  // Update selection-dependent controls
+  updateControls();
 }
 
 function updateControls() {
-  const dimmed = selectedIndex === null || busy;
+  const dimmed = selectedIndex === null || busy || !writer;
   keyboardDiv.classList.toggle('dimmed', dimmed);
+
   const hint = document.querySelector('.keyboard-hint');
   if (hint) {
     let modeText = '';
@@ -400,15 +403,17 @@ function updateControls() {
       else if (mode === 2) modeText = 'Macro mode – build steps, then save to Arduino.';
     }
     hint.textContent = dimmed
-      ? 'Click a button above to select it.'
+      ? (writer ? 'Click a button above to select it.' : 'Disconnected – click Connect to start')
       : `Selected Button ${selectedIndex+1} – ${modeText}`;
   }
+
   const hasSteps = selectedIndex !== null && modes[selectedIndex] === 2 && (macroData[selectedIndex]?.steps?.length || 0) > 0;
-  applyMacroBtn.disabled = dimmed || !writer || (selectedIndex !== null && modes[selectedIndex] !== 2) || !hasSteps;
-  applyDualBtn.disabled = dimmed || !writer;
-  copyPressToReleaseBtn.disabled = dimmed || !writer;
-  addStepBtn.disabled = dimmed || !writer || (selectedIndex !== null && modes[selectedIndex] !== 2);
-  clearMacroBtn.disabled = dimmed || !writer || (selectedIndex !== null && modes[selectedIndex] !== 2);
+  applyMacroBtn.disabled = dimmed || (selectedIndex !== null && modes[selectedIndex] !== 2) || !hasSteps;
+  applyDualBtn.disabled = dimmed;
+  copyPressToReleaseBtn.disabled = dimmed;
+  addStepBtn.disabled = dimmed || (selectedIndex !== null && modes[selectedIndex] !== 2);
+  clearMacroBtn.disabled = dimmed || (selectedIndex !== null && modes[selectedIndex] !== 2);
+
   updateModeSectionState();
 }
 
@@ -1097,12 +1102,14 @@ async function disconnect() {
     clearInterval(heartbeatInterval);
     heartbeatInterval = null;
   }
-  // Cancel all pending requests
+
+  // Cancel any pending requests
   for (const req of pendingRequests) {
     if (req.timeoutId) clearTimeout(req.timeoutId);
     req.reject(new Error('Disconnected'));
   }
   pendingRequests = [];
+
   const oldReader = reader;
   const oldWriter = writer;
   const oldPort = port;
@@ -1110,11 +1117,14 @@ async function disconnect() {
   writer = null;
   port = null;
   busy = false;
+
   try {
     if (oldReader) await oldReader.cancel();
     if (oldWriter) await oldWriter.close();
     if (oldPort) await oldPort.close();
   } catch (e) { /* ignore */ }
+
+  // ---- CLEAR STATE ----
   pressKeys = [];
   releaseKeys = [];
   modes = [];
@@ -1124,8 +1134,11 @@ async function disconnect() {
   socdPairs = [];
   socdPicking = false;
   socdPickBuffer = [];
+
+  // ---- FORCE UI UPDATE ----
   renderGrid();
   renderSocdList();
+  updateDisplays();      // 👈 ADD THIS LINE – clears Press/Release displays
   updateUI();
   updateSocdHint();
   updateModeSectionState();
