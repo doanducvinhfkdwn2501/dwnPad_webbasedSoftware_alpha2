@@ -194,6 +194,18 @@ function getDisplayLabel(idx) {
 
 function keyCodeToDisplay(key) {
   if (!key) return '—';
+  
+  // Media keys display names
+  const mediaMap = {
+    'PLAY': '▶⏸',
+    'NEXT': '⏭',
+    'PREV': '⏮',
+    'VOLUP': '🔊+',
+    'VOLDOWN': '🔊-',
+    'MUTE': '🔇'
+  };
+  if (mediaMap[key]) return mediaMap[key];
+  
   const strKey = String(key);
   if (!isNaN(strKey)) {
     const codeMap = {
@@ -1350,3 +1362,29 @@ if (!('serial' in navigator)) {
   log('❌ Web Serial API not supported. Use Chrome/Edge.', true);
   connectBtn.disabled = true;
 }
+// ---------- Dark Mode Toggle ----------
+const darkModeBtn = document.getElementById('darkModeBtn');
+let darkMode = true;
+
+function toggleDarkMode() {
+  darkMode = !darkMode;
+  document.body.classList.toggle('light-mode', !darkMode);
+  darkModeBtn.textContent = darkMode ? ' Dark Mode' : ' Light Mode';
+  localStorage.setItem('theme', darkMode ? 'dark' : 'light');
+}
+
+function loadTheme() {
+  const saved = localStorage.getItem('theme');
+  if (saved === 'light') {
+    darkMode = false;
+    document.body.classList.add('light-mode');
+    darkModeBtn.textContent = ' Light Mode';
+  } else {
+    darkMode = true;
+    document.body.classList.remove('light-mode');
+    darkModeBtn.textContent = ' Dark Mode';
+  }
+}
+
+darkModeBtn.addEventListener('click', toggleDarkMode);
+loadTheme();
