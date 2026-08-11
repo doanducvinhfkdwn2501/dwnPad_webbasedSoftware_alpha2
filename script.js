@@ -195,16 +195,6 @@ function getDisplayLabel(idx) {
 function keyCodeToDisplay(key) {
   if (!key) return '—';
   
-  // Media keys display names
-  const mediaMap = {
-    'PLAY': '▶⏸',
-    'NEXT': '⏭',
-    'PREV': '⏮',
-    'VOLUP': '🔊+',
-    'VOLDOWN': '🔊-',
-    'MUTE': '🔇'
-  };
-  if (mediaMap[key]) return mediaMap[key];
   
   const strKey = String(key);
   if (!isNaN(strKey)) {
@@ -382,8 +372,8 @@ function updateUI() {
     heartbeatInterval = null;
   }
 
-  // Show/hide the button grid
-  buttonGrid.classList.toggle('hidden', !connected);
+  // ---- FIX: Grid visibility depends ONLY on writer ----
+  buttonGrid.classList.toggle('hidden', !writer);
 
   // Update selection-dependent controls
   updateControls();
@@ -566,12 +556,11 @@ function addStep() {
   if (selectedIndex === null) return;
   if (!macroData[selectedIndex]) macroData[selectedIndex] = { steps: [] };
   
-  // ----- NEW: Cap at 7 steps -----
+  // Cap at 7 steps
   if (macroData[selectedIndex].steps.length >= 7) {
     log('⚠️ Maximum 7 steps per macro (Arduino limit).', true);
     return;
   }
-  // --------------------------------
   
   macroData[selectedIndex].steps.push({ action: 'P', key: '', delay: 0 });
   selectedStepIndex = macroData[selectedIndex].steps.length - 1;
@@ -669,8 +658,7 @@ function removeSocdPairByButton(buttonIndex) {
 // ---------- Fetch all data (using new collector) ----------
 async function fetchAllData() {
   if (!writer || busy) return;
-  busy = true;
-  updateUI();
+  setBusy(true, 'Fetching data from Arduino...');
   try {
     // Fetch press keys
     const pressLines = await sendCommandAndCollect('GETPRESSALL');
@@ -721,8 +709,7 @@ async function fetchAllData() {
   } catch (e) {
     log(`Fetch data error: ${e.message}`, true);
   } finally {
-    busy = false;
-    updateUI();
+    setBusy(false);
   }
 }
 
@@ -771,8 +758,7 @@ async function fetchMacros() {
 // ---------- Fetch SOCD ----------
 async function fetchSocd() {
   if (!writer || busy) return;
-  busy = true;
-  updateUI();
+  setBusy(true, 'Fetching SOCD data...');
   try {
     await sendCommand('GETSOCD');
     const resp = await waitForLine(line => line.startsWith('SOCD:'), 1500);
@@ -798,8 +784,7 @@ async function fetchSocd() {
   } catch (e) {
     log(`Fetch SOCD error: ${e.message}`, true);
   } finally {
-    busy = false;
-    updateUI();
+    setBusy(false);
   }
 }
 
@@ -816,8 +801,7 @@ async function addSocdPair(idx1, idx2) {
     log('One of these buttons is already in a SOCD pair', true);
     return;
   }
-  busy = true;
-  updateUI();
+  setBusy(true, 'Adding SOCD pair...');
   try {
     await sendCommand(`SOCD ADD ${idx1+1} ${idx2+1}`);
     await new Promise(r => setTimeout(r, 50));
@@ -838,15 +822,13 @@ async function addSocdPair(idx1, idx2) {
   } catch (e) {
     log(`Add SOCD error: ${e.message}`, true);
   } finally {
-    busy = false;
-    updateUI();
+    setBusy(false);
   }
 }
 
 async function removeSocdPair(index) {
   if (!writer || busy) return;
-  busy = true;
-  updateUI();
+  setBusy(true, 'Removing SOCD pair...');
   try {
     await sendCommand(`SOCD REMOVE ${index+1}`);
     await new Promise(r => setTimeout(r, 50));
@@ -867,15 +849,13 @@ async function removeSocdPair(index) {
   } catch (e) {
     log(`Remove SOCD error: ${e.message}`, true);
   } finally {
-    busy = false;
-    updateUI();
+    setBusy(false);
   }
 }
 
 async function clearAllSocd() {
   if (!writer || busy) return;
-  busy = true;
-  updateUI();
+  setBusy(true, 'Clearing all SOCD pairs...');
   try {
     await sendCommand('SOCD CLEAR');
     await new Promise(r => setTimeout(r, 50));
@@ -896,8 +876,7 @@ async function clearAllSocd() {
   } catch (e) {
     log(`Clear SOCD error: ${e.message}`, true);
   } finally {
-    busy = false;
-    updateUI();
+    setBusy(false);
   }
 }
 
@@ -905,8 +884,7 @@ async function clearAllSocd() {
 async function setPressKey(index, keyName) {
   if (index < 0 || index > 5) return false;
   if (!writer || busy) return false;
-  busy = true;
-  updateUI();
+  setBusy(true, 'Setting press key...');
   try {
     await sendCommand(`SETPRESS ${index+1}:${keyName}`);
     const resp = await waitForLine(line => line === 'OK', 1500);
@@ -927,16 +905,14 @@ async function setPressKey(index, keyName) {
     log(`Set press error: ${e.message}`, true);
     return false;
   } finally {
-    busy = false;
-    updateUI();
+    setBusy(false);
   }
 }
 
 async function setReleaseKey(index, keyName) {
   if (index < 0 || index > 5) return false;
   if (!writer || busy) return false;
-  busy = true;
-  updateUI();
+  setBusy(true, 'Setting release key...');
   try {
     await sendCommand(`SETRELEASE ${index+1}:${keyName}`);
     const resp = await waitForLine(line => line === 'OK', 1500);
@@ -954,8 +930,7 @@ async function setReleaseKey(index, keyName) {
     log(`Set release error: ${e.message}`, true);
     return false;
   } finally {
-    busy = false;
-    updateUI();
+    setBusy(false);
   }
 }
 
@@ -968,8 +943,7 @@ async function setMode(index, modeVal) {
     removeSocdPairByButton(index);
   }
   
-  busy = true;
-  updateUI();
+  setBusy(true, 'Setting mode...');
   try {
     await sendCommand(`SETMODE ${index+1}:${modeVal}`);
     const resp = await waitForLine(line => line === 'OK', 1500);
@@ -993,8 +967,7 @@ async function setMode(index, modeVal) {
     log(`Set mode error: ${e.message}`, true);
     return false;
   } finally {
-    busy = false;
-    updateUI();
+    setBusy(false);
   }
 }
 
@@ -1021,14 +994,12 @@ async function refreshAll() {
 async function resetToDefaults() {
   if (!writer || busy) return;
   if (!confirm('Reset all keys to defaults (q,w,e,a,s,d) and clear SOCD?')) return;
-  busy = true;
-  updateUI();
+  setBusy(true, 'Resetting to defaults...');
   try {
     await sendCommand('RESET');
     const resp = await waitForLine(line => line === 'OK RESET', 2000);
     if (resp) {
       log('Reset to defaults');
-      busy = false;
       await fetchAllData();
       await fetchSocd();
       if (selectedIndex !== null) {
@@ -1047,8 +1018,7 @@ async function resetToDefaults() {
   } catch (e) {
     log(`Reset error: ${e.message}`, true);
   } finally {
-    busy = false;
-    updateUI();
+    setBusy(false);
   }
 }
 
@@ -1098,6 +1068,8 @@ async function connect() {
 }
 
 async function disconnect() {
+  setBusy(true, 'Disconnecting...');
+  
   if (heartbeatInterval) {
     clearInterval(heartbeatInterval);
     heartbeatInterval = null;
@@ -1116,7 +1088,6 @@ async function disconnect() {
   reader = null;
   writer = null;
   port = null;
-  busy = false;
 
   try {
     if (oldReader) await oldReader.cancel();
@@ -1138,11 +1109,12 @@ async function disconnect() {
   // ---- FORCE UI UPDATE ----
   renderGrid();
   renderSocdList();
-  updateDisplays();      // 👈 ADD THIS LINE – clears Press/Release displays
+  updateDisplays();
   updateUI();
   updateSocdHint();
   updateModeSectionState();
   log('Disconnected');
+  setBusy(false);
 }
 
 // ---------- Build Keyboard ----------
@@ -1387,6 +1359,7 @@ if (!('serial' in navigator)) {
   log('❌ Web Serial API not supported. Use Chrome/Edge.', true);
   connectBtn.disabled = true;
 }
+
 // ---------- Dark Mode Toggle ----------
 const darkModeBtn = document.getElementById('darkModeBtn');
 let darkMode = true;
@@ -1394,7 +1367,7 @@ let darkMode = true;
 function toggleDarkMode() {
   darkMode = !darkMode;
   document.body.classList.toggle('light-mode', !darkMode);
-  darkModeBtn.textContent = darkMode ? ' Dark Mode' : ' Light Mode';
+  darkModeBtn.textContent = darkMode ? 'Dark Mode' : 'Light Mode';
   localStorage.setItem('theme', darkMode ? 'dark' : 'light');
 }
 
@@ -1403,13 +1376,57 @@ function loadTheme() {
   if (saved === 'light') {
     darkMode = false;
     document.body.classList.add('light-mode');
-    darkModeBtn.textContent = ' Light Mode';
+    darkModeBtn.textContent = 'Light Mode';
   } else {
     darkMode = true;
     document.body.classList.remove('light-mode');
-    darkModeBtn.textContent = ' Dark Mode';
+    darkModeBtn.textContent = 'Dark Mode';
   }
 }
 
 darkModeBtn.addEventListener('click', toggleDarkMode);
 loadTheme();
+
+// ---------- Loading Spinner ----------
+let spinnerTimeout = null;
+
+function showSpinner(message = 'Loading...') {
+  const overlay = document.getElementById('spinnerOverlay');
+  const msgEl = document.getElementById('spinnerMessage');
+  if (!overlay || !msgEl) return;
+  
+  // Clear any pending hide timeout
+  if (spinnerTimeout) {
+    clearTimeout(spinnerTimeout);
+    spinnerTimeout = null;
+  }
+  
+  msgEl.textContent = message;
+  overlay.classList.add('active');
+  overlay.style.display = 'flex';
+}
+
+function hideSpinner() {
+  const overlay = document.getElementById('spinnerOverlay');
+  if (!overlay) return;
+  
+  // Clear any pending timeout
+  if (spinnerTimeout) {
+    clearTimeout(spinnerTimeout);
+    spinnerTimeout = null;
+  }
+  
+  overlay.classList.remove('active');
+  overlay.style.display = 'none';
+}
+
+// This function sets the `busy` state AND shows/hides the spinner
+function setBusy(state, message = 'Loading...') {
+  busy = state;
+  if (state) {
+    showSpinner(message);
+  } else {
+    hideSpinner();
+  }
+  updateUI();
+}

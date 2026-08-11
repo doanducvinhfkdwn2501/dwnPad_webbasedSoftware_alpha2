@@ -21,6 +21,14 @@
       </div>
     </header>
 
+    <!-- Loading Spinner Overlay -->
+    <div id="spinnerOverlay">
+      <div class="spinner-container">
+        <div class="spinner"></div>
+        <p id="spinnerMessage">Loading...</p>
+      </div>
+    </div>
+
     <!-- 2×3 Button Grid -->
     <div class="button-grid" id="buttonGrid"></div>
 
@@ -38,7 +46,7 @@
         <span>Mode:</span>
         <label><input type="radio" name="mode" value="0" checked /> Key</label>
         <label><input type="radio" name="mode" value="1" /> Dual (Press + Release)</label>
-        <label><input type="radio" name="mode" value="2" /><i>REALLY BUGGY MACRO</i></label>
+        <label><input type="radio" name="mode" value="2" /> Macro</label>
       </div>
 
       <!-- Key Mode -->
@@ -65,7 +73,7 @@
         </div>
       </div>
 
-      <!-- Macro Mode (no profiles) -->
+      <!-- Macro Mode -->
       <div id="macroControls" class="macro-controls" style="display:none;">
         <div class="macro-steps" id="macroSteps">
           <!-- Steps rendered by JS -->
@@ -73,7 +81,7 @@
         <div class="macro-actions">
           <button id="addStepBtn" class="btn secondary">➕ Add Step</button>
           <button id="clearMacroBtn" class="btn danger">✖ Clear Macro</button>
-          <button id="applyMacroBtn" class="btn primary">💾 Save to Arduino(if it's long it my brick ur stuffs)</button>
+          <button id="applyMacroBtn" class="btn primary">💾 Save to Arduino</button>
         </div>
       </div>
     </div>
